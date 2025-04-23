@@ -1,452 +1,240 @@
-// SPDX-FileCopyrightText: 2022 Comcast Cable Communications Management, LLC
+// SPDX-FileCopyrightText: 2025 Comcast Cable Communications Management, LLC
 // SPDX-License-Identifier: Apache-2.0
 
 package wrphttp
 
 import (
-	"bytes"
 	"fmt"
 	"io"
 	"net/http"
 	"strconv"
 	"strings"
 
-	"github.com/xmidt-org/wrp-go/v3"
+	"github.com/xmidt-org/wrp-go/v5"
 )
 
-// Constant HTTP header strings representing WRP fields
+type hdr []string
+
+func (h hdr) Get(headers http.Header) string {
+	for _, key := range h {
+		if val := headers.Get(key); val != "" {
+			return val
+		}
+	}
+	return ""
+}
+
+func (h hdr) Values(headers http.Header) []string {
+	var values []string
+	for _, key := range h {
+		if val := headers.Values(key); len(val) > 0 {
+			values = append(values, val...)
+		}
+	}
+	return values
+}
+
 const (
-	MessageTypeHeader             = "X-Xmidt-Message-Type"
-	TransactionUuidHeader         = "X-Xmidt-Transaction-Uuid" // nolint:gosec
-	StatusHeader                  = "X-Xmidt-Status"
-	RequestDeliveryResponseHeader = "X-Xmidt-Request-Delivery-Response"
-	IncludeSpansHeader            = "X-Xmidt-Include-Spans"
-	SpanHeader                    = "X-Xmidt-Span"
-	PathHeader                    = "X-Xmidt-Path"
-	SourceHeader                  = "X-Xmidt-Source"
-	DestinationHeader             = "X-Webpa-Device-Name"
-	AcceptHeader                  = "X-Xmidt-Accept"
-	MetadataHeader                = "X-Xmidt-Metadata"
-	PartnerIdHeader               = "X-Xmidt-Partner-Id"
-	SessionIdHeader               = "X-Xmidt-Session-Id"
-	HeadersHeader                 = "X-Xmidt-Headers"
-	ServiceNameHeader             = "X-Xmidt-Service-Name"
-	URLHeader                     = "X-Xmidt-Url"
+	styleXXmidt = "X-Xmidt"
+	styleXMidt  = "X-Midt"
+	styleXmidt  = "Xmidt"
+	styleXWebpa = "X-Webpa"
 )
 
-// X-midt-* headers are deprecated and will stop being supported
-// Please use X-Xmidt-* headers instead
-const (
-	msgTypeHeader         = "X-Midt-Msg-Type"
-	transactionUuidHeader = "X-Midt-Transaction-Uuid"
-	statusHeader          = "X-Midt-Status"
-	rDRHeader             = "X-Midt-Request-Delivery-Response"
-	headersArrHeader      = "X-Midt-Headers"
-	includeSpansHeader    = "X-Midt-Include-Spans"
-	spansHeader           = "X-Midt-Spans"
-	pathHeader            = "X-Midt-Path"
-	sourceHeader          = "X-Midt-Source"
-	destinationHeader     = "X-Webpa-Device-Name"
-	acceptHeader          = "X-Midt-Accept"
-	metadataHeader        = "X-Midt-Metadata"
-	partnerIdHeader       = "X-Midt-Partner-Id"
-	sessionIdHeader       = "X-Midt-Session-Id"
-	headersHeader         = "X-Midt-Headers"
-	serviceNameHeader     = "X-Midt-Service-Name"
-	urlHeader             = "X-Midt-Url"
-)
+func (h hdr) As(s string) string {
+	switch s {
+	case "X-Xmidt":
+		return h[0]
+	case "X-Midt":
+		return h[1]
+	case "Xmidt":
+		return h[2]
+	case "X-Webpa":
+		if len(h) == 4 {
+			return h[3]
+		}
+		return h[0]
+	}
+
+	return ""
+}
 
 var (
-	errMissingMessageTypeHeader = fmt.Errorf("missing %s header", MessageTypeHeader)
+	// Ensure the formats are: X-Xmidt, X-Midt, Xmidt, X-Webpa
+	messageTypeHeader     = hdr{"X-Xmidt-Message-Type" /*        */, "X-Midt-Message-Type" /*        */, "Xmidt-Message-Type" /*        */}
+	transactionUuidHeader = hdr{"X-Xmidt-Transaction-Uuid" /*    */, "X-Midt-Transaction-Uuid" /*    */, "Xmidt-Transaction-Uuid" /*    */}
+	statusHeader          = hdr{"X-Xmidt-Status" /*              */, "X-Midt-Status" /*              */, "Xmidt-Status" /*              */}
+	rdrHeader             = hdr{"X-Xmidt-Request-Delivery-Response", "X-Midt-Request-Delivery-Response", "Xmidt-Request-Delivery-Response"}
+	pathHeader            = hdr{"X-Xmidt-Path" /*                */, "X-Midt-Path" /*                */, "Xmidt-Path" /*                */}
+	sourceHeader          = hdr{"X-Xmidt-Source" /*              */, "X-Midt-Source" /*              */, "Xmidt-Source" /*              */}
+	destinationHeader     = hdr{"X-Xmidt-Destination" /*         */, "X-Midt-Destination" /*         */, "Xmidt-Destination" /*         */, "X-Webpa-Device-Name"}
+	acceptHeader          = hdr{"X-Xmidt-Accept" /*              */, "X-Midt-Accept" /*              */, "Xmidt-Accept" /*              */}
+	metadataHeader        = hdr{"X-Xmidt-Metadata" /*            */, "X-Midt-Metadata" /*            */, "Xmidt-Metadata" /*            */}
+	partnerIdHeader       = hdr{"X-Xmidt-Partner-Id" /*          */, "X-Midt-Partner-Id" /*          */, "Xmidt-Partner-Id" /*          */}
+	sessionIdHeader       = hdr{"X-Xmidt-Session-Id" /*          */, "X-Midt-Session-Id" /*          */, "Xmidt-Session-Id" /*          */}
+	headersHeader         = hdr{"X-Xmidt-Headers" /*             */, "X-Midt-Headers" /*             */, "Xmidt-Headers" /*             */}
+	serviceNameHeader     = hdr{"X-Xmidt-Service-Name" /*        */, "X-Midt-Service-Name" /*        */, "Xmidt-Service-Name" /*        */}
+	urlHeader             = hdr{"X-Xmidt-Url" /*                 */, "X-Midt-Url" /*                 */, "Xmidt-Url" /*                 */}
 )
 
-// getMessageType extracts the wrp.MessageType from header.  This is a required field.
-//
-// This function panics if the message type header is missing or invalid.
-func getMessageType(h http.Header) wrp.MessageType {
-	value := h.Get(MessageTypeHeader)
-	if len(value) == 0 {
-		// check alternative header prefix
-		value = h.Get(msgTypeHeader)
-		if len(value) == 0 {
-			panic(errMissingMessageTypeHeader)
-		}
+func toHeadersForm(msg wrp.Union, typ string, validators ...wrp.Processor) (http.Header, []byte, error) {
+	headers := make(http.Header)
+
+	var out wrp.Message
+	if err := msg.To(&out, validators...); err != nil {
+		return nil, nil, err
 	}
 
-	messageType := wrp.StringToMessageType(value)
-	return messageType
-}
+	h := wrpHeader{headers: headers, typ: typ}
 
-// getIntHeader returns the header as a int64, or returns nil if the header is absent.
-// This function panics if the header is present but not a valid integer.
-func getIntHeader(h http.Header, n string) *int64 {
-	value := h.Get(n)
-	if len(value) == 0 {
-		return nil
-	}
+	headers.Set(messageTypeHeader.As(typ), out.MsgType().FriendlyName())
 
-	i, err := strconv.ParseInt(value, 10, 64)
-	if err != nil {
-		panic(err)
-	}
-
-	return &i
-}
-
-func getBoolHeader(h http.Header, n string) *bool {
-	value := h.Get(n)
-	if len(value) == 0 {
-		return nil
-	}
-
-	b, err := strconv.ParseBool(value)
-	if err != nil {
-		panic(err)
-	}
-
-	return &b
-}
-
-func getSpans(h http.Header) [][]string {
-	header := SpanHeader
-	if len(h[SpanHeader]) == 0 {
-		if len(h[spansHeader]) == 0 {
-			return nil
-		}
-		header = spansHeader // alternative header version
-	}
-
-	spans := make([][]string, len(h[header]))
-
-	for i, value := range h[header] {
-		fields := strings.Split(value, ",")
-		if len(fields) != 3 {
-			panic(fmt.Errorf("invalid %s header: %s", header, value))
-		}
-
-		for j := 0; j < len(fields); j++ {
-			fields[j] = strings.TrimSpace(fields[j])
-		}
-
-		spans[i] = fields
-	}
-
-	return spans
-}
-
-// getMetadata returns the map that represents the metadata fields that were
-// passed in as headers.  This function handles multiple duplicate headers.
-// This function panics if the header contains data that is not a name=value
-// pair.
-func getMetadata(h http.Header) map[string]string {
-	headers, ok := h[MetadataHeader]
-	if !ok {
-		// Check alternative header version
-		headers, ok = h[metadataHeader]
-		if !ok {
-			return nil
-		}
-	}
-
-	meta := make(map[string]string)
-
-	for _, value := range headers {
-		fields := strings.Split(value, ",")
-		for _, v := range fields {
-			kv := strings.Split(v, "=")
-			if 0 < len(kv) {
-				key := strings.TrimSpace(kv[0])
-				kv = append(kv, "")
-				meta[key] = strings.Join(kv[1:], "")
+	h.toIntPtrHeader(statusHeader, out.Status, headers)
+	h.toIntPtrHeader(rdrHeader, out.RequestDeliveryResponse, headers)
+	h.toStringHeader(transactionUuidHeader, out.TransactionUUID, headers)
+	h.toStringHeader(pathHeader, out.Path, headers)
+	h.toStringHeader(sourceHeader, out.Source, headers)
+	h.toStringHeader(destinationHeader, out.Destination, headers)
+	h.toStringHeader(acceptHeader, out.Accept, headers)
+	h.toStringHeader(sessionIdHeader, out.SessionID, headers)
+	h.toStringHeader(serviceNameHeader, out.ServiceName, headers)
+	h.toStringHeader(urlHeader, out.URL, headers)
+	if out.Metadata != nil {
+		for k, v := range out.Metadata {
+			if v != "" {
+				headers.Add(metadataHeader.As(typ), fmt.Sprintf("%s:%s", k, v))
 			}
 		}
 	}
-	return meta
-}
-
-// getPartnerIDs returns the array that represents the partner-ids that were
-// passed in as headers.  This function handles multiple duplicate headers.
-func getPartnerIDs(h http.Header) []string {
-	headers, ok := h[PartnerIdHeader]
-	if !ok || len(headers) == 0 {
-		// Check alternative header version
-		headers, ok = h[partnerIdHeader]
-
-		if !ok || len(headers) == 0 {
-			return nil
-		}
+	partners := strings.Join(out.PartnerIDs, ",")
+	if partners != "" {
+		headers.Set(partnerIdHeader.As(typ), partners)
 	}
-
-	partners := []string{}
-
-	for _, value := range headers {
-		fields := strings.Split(value, ",")
-		for i := 0; i < len(fields); i++ {
-			fields[i] = strings.TrimSpace(fields[i])
-		}
-		partners = append(partners, fields...)
-	}
-
-	return partners
-}
-
-func readPayload(h http.Header, p io.Reader) ([]byte, string) {
-	if p == nil {
-		return nil, ""
-	}
-
-	payload, err := io.ReadAll(p)
-	if err != nil {
-		panic(err)
-	}
-
-	if len(payload) == 0 {
-		return nil, ""
-	}
-
-	contentType := h.Get("Content-Type")
-	if len(contentType) == 0 && len(payload) > 0 {
-		contentType = wrp.MimeTypeOctetStream
-	}
-
-	return payload, contentType
-}
-
-// getHeaders returns the array that represents the headers that were
-// passed in as headers.  This function handles multiple duplicate headers.
-func getHeaders(h http.Header) []string {
-	headers, ok := h[HeadersHeader]
-	if !ok || len(headers) == 0 {
-		// Check alternative header version
-		headers, ok = h[headersHeader]
-
-		if !ok || len(headers) == 0 {
-			return nil
-		}
-	}
-
-	hlist := []string{}
-
-	for _, value := range headers {
-		fields := strings.Split(value, ",")
-		for i := 0; i < len(fields); i++ {
-			fields[i] = strings.TrimSpace(fields[i])
-		}
-		hlist = append(hlist, fields...)
-	}
-
-	return hlist
-}
-
-// NewMessageFromHeaders extracts a WRP message from a set of HTTP headers.  If supplied, the
-// given io.Reader is assumed to contain the payload of the WRP message.
-func NewMessageFromHeaders(h http.Header, p io.Reader) (message *wrp.Message, err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			message = nil
-			switch v := r.(type) {
-			case error:
-				err = v
-			default:
-				err = fmt.Errorf("unable to create WRP message: %s", v)
+	if out.Headers != nil {
+		for _, v := range out.Headers {
+			if v != "" {
+				headers.Add(headersHeader.As(typ), v)
 			}
 		}
-	}()
-
-	payload, contentType := readPayload(h, p)
-	message = new(wrp.Message)
-	err = SetMessageFromHeaders(h, message)
-	if err != nil {
-		message = nil
 	}
 
-	message.Payload = payload
-	message.ContentType = contentType
-	return
+	return headers, out.Payload, nil
 }
 
-// SetMessageFromHeaders transfers header fields onto the given WRP message.  The payload is not
-// handled by this method.
-func SetMessageFromHeaders(h http.Header, m *wrp.Message) (err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			switch v := r.(type) {
-			case error:
-				err = v
-			default:
-				err = fmt.Errorf("Unable to create WRP message: %s", v)
+func fromHeaders(headers http.Header, body io.ReadCloser, validators ...wrp.Processor) (wrp.Union, error) {
+	var msg wrp.Message
+
+	if msgType := messageTypeHeader.Get(headers); msgType != "" {
+		msg.Type = wrp.StringToMessageType(msgType)
+	}
+
+	h := wrpHeader{headers: headers}
+
+	h.readString(transactionUuidHeader, &msg.TransactionUUID)
+	h.readInt(statusHeader, &msg.Status)
+	h.readInt(rdrHeader, &msg.RequestDeliveryResponse)
+	h.readString(pathHeader, &msg.Path)
+	h.readString(sourceHeader, &msg.Source)
+	h.readString(destinationHeader, &msg.Destination)
+	h.readString(acceptHeader, &msg.Accept)
+	h.readString(sessionIdHeader, &msg.SessionID)
+	h.readString(serviceNameHeader, &msg.ServiceName)
+	h.readString(urlHeader, &msg.URL)
+	h.readStrings(partnerIdHeader, &msg.PartnerIDs)
+	h.readHashmap(metadataHeader, &msg.Metadata)
+	h.readHeaders(headersHeader, &msg.Headers)
+
+	if body != nil {
+		payload, err := io.ReadAll(body)
+		defer body.Close()
+
+		if err != nil {
+			return nil, fmt.Errorf("failed to read body: %w", err)
+		}
+		msg.Payload = payload
+	}
+
+	if err := msg.Validate(validators...); err != nil {
+		return nil, err
+	}
+
+	return &msg, nil
+}
+
+type wrpHeader struct {
+	headers http.Header
+	typ     string
+}
+
+func (h wrpHeader) toStringHeader(key hdr, value string, headers http.Header) {
+	if value != "" {
+		headers.Set(key.As(h.typ), value)
+	}
+}
+
+func (h wrpHeader) toIntPtrHeader(key hdr, value *int64, headers http.Header) {
+	if value != nil {
+		headers.Set(key.As(h.typ), fmt.Sprintf("%d", *value))
+	}
+}
+
+func (h wrpHeader) readString(key hdr, target *string) {
+	if val := key.Get(h.headers); val != "" {
+		*target = val
+	}
+}
+
+func (h wrpHeader) readStrings(key hdr, target *[]string) {
+	if val := key.Values(h.headers); len(val) > 0 {
+		list := make([]string, 0, len(val))
+		for _, p := range val {
+			items := strings.Split(p, ",")
+			for _, item := range items {
+				item = strings.TrimSpace(item)
+				if item != "" {
+					list = append(list, item)
+				}
 			}
 		}
-	}()
-
-	m.Type = getMessageType(h)
-	m.Source = h.Get(SourceHeader)
-	if m.Source == "" {
-		m.Source = h.Get(sourceHeader)
-	}
-	m.Destination = h.Get(DestinationHeader)
-	if m.Destination == "" {
-		m.Destination = h.Get(destinationHeader)
-	}
-	m.TransactionUUID = h.Get(TransactionUuidHeader)
-	if m.TransactionUUID == "" {
-		m.TransactionUUID = h.Get(transactionUuidHeader)
-	}
-	m.Status = getIntHeader(h, StatusHeader)
-	if m.Status == nil {
-		m.Status = getIntHeader(h, statusHeader)
-	}
-	m.RequestDeliveryResponse = getIntHeader(h, RequestDeliveryResponseHeader)
-	if m.RequestDeliveryResponse == nil {
-		m.RequestDeliveryResponse = getIntHeader(h, rDRHeader)
-	}
-	// TODO Remove along with `IncludeSpans`
-	// nolint:staticcheck
-	m.IncludeSpans = getBoolHeader(h, IncludeSpansHeader)
-	// nolint:staticcheck
-	if m.IncludeSpans == nil {
-		// nolint:staticcheck
-		m.IncludeSpans = getBoolHeader(h, includeSpansHeader)
-	}
-	m.Spans = getSpans(h)
-	m.ContentType = h.Get("Content-Type")
-	m.Accept = h.Get(AcceptHeader)
-	if m.Accept == "" {
-		m.Accept = h.Get(acceptHeader)
-	}
-	m.Path = h.Get(PathHeader)
-	if m.Path == "" {
-		m.Path = h.Get(pathHeader)
-	}
-	m.Metadata = getMetadata(h)
-	m.PartnerIDs = getPartnerIDs(h)
-	m.SessionID = h.Get(SessionIdHeader)
-	if m.SessionID == "" {
-		m.SessionID = h.Get(sessionIdHeader)
-	}
-	m.Headers = getHeaders(h)
-	m.ServiceName = h.Get(ServiceNameHeader)
-	if m.ServiceName == "" {
-		m.ServiceName = h.Get(serviceNameHeader)
-	}
-	m.URL = h.Get(URLHeader)
-	if m.URL == "" {
-		m.URL = h.Get(urlHeader)
-	}
-	return
-}
-
-// AddMessageHeaders adds the HTTP header representation of a given WRP message.
-// This function does not handle the payload, to allow further headers to be written by
-// calling code.
-func AddMessageHeaders(h http.Header, m *wrp.Message) {
-	h.Set(MessageTypeHeader, m.Type.FriendlyName())
-
-	if len(m.Source) > 0 {
-		h.Set(SourceHeader, m.Source)
-	}
-
-	if len(m.Destination) > 0 {
-		h.Set(DestinationHeader, m.Destination)
-	}
-
-	if len(m.TransactionUUID) > 0 {
-		h.Set(TransactionUuidHeader, m.TransactionUUID)
-	}
-
-	if m.Status != nil {
-		h.Set(StatusHeader, strconv.FormatInt(*m.Status, 10))
-	}
-
-	if m.RequestDeliveryResponse != nil {
-		h.Set(RequestDeliveryResponseHeader, strconv.FormatInt(*m.RequestDeliveryResponse, 10))
-	}
-
-	// TODO Remove along with `IncludeSpans`
-	// nolint:staticcheck
-	if m.IncludeSpans != nil {
-		h.Set(IncludeSpansHeader, strconv.FormatBool(*m.IncludeSpans))
-	}
-
-	for _, s := range m.Spans {
-		h.Add(SpanHeader, strings.Join(s, ","))
-	}
-
-	if len(m.Accept) > 0 {
-		h.Set(AcceptHeader, m.Accept)
-	}
-
-	if len(m.Path) > 0 {
-		h.Set(PathHeader, m.Path)
-	}
-
-	for k, v := range m.Metadata {
-		// perform k + "=" + v more efficiently
-		buf := bytes.Buffer{}
-		buf.WriteString(k)
-		buf.WriteString("=")
-		buf.WriteString(v)
-		h.Add(MetadataHeader, buf.String())
-	}
-
-	for _, v := range m.PartnerIDs {
-		h.Add(PartnerIdHeader, v)
-	}
-
-	if len(m.SessionID) > 0 {
-		h.Set(SessionIdHeader, m.SessionID)
-	}
-
-	for _, v := range m.Headers {
-		h.Add(HeadersHeader, v)
-	}
-
-	if len(m.ServiceName) > 0 {
-		h.Set(ServiceNameHeader, m.ServiceName)
-	}
-
-	if len(m.URL) > 0 {
-		h.Set(URLHeader, m.URL)
+		*target = list
 	}
 }
 
-// ReadPayload extracts the payload from a reader, setting the appropriate
-// fields on the given message.
-func ReadPayload(h http.Header, p io.Reader, m *wrp.Message) (int, error) {
-	contentType := h.Get("Content-Type")
-	if len(contentType) == 0 {
-		contentType = wrp.MimeTypeOctetStream
-	}
-
-	var err error
-	m.Payload, err = io.ReadAll(p)
-	if err != nil {
-		return 0, err
-	}
-
-	m.ContentType = contentType
-	return len(m.Payload), nil
-}
-
-// WritePayload writes the WRP payload to the given io.Writer.  If the message has no
-// payload, this function does nothing.
-//
-// The http.Header is optional.  If supplied, the header's Content-Type and Content-Length
-// will be set appropriately.
-func WritePayload(h http.Header, p io.Writer, m *wrp.Message) (int, error) {
-	if len(m.Payload) == 0 {
-		return 0, nil
-	}
-
-	if h != nil {
-		if len(m.ContentType) > 0 {
-			h.Set("Content-Type", m.ContentType)
-		} else {
-			h.Set("Content-Type", wrp.MimeTypeOctetStream)
+func (h wrpHeader) readInt(key hdr, target **int64) {
+	if val := key.Get(h.headers); val != "" {
+		v, err := strconv.ParseInt(val, 10, 64)
+		if err == nil {
+			if *target == nil {
+				*target = new(int64)
+			}
+			**target = v
 		}
-
-		h.Set("Content-Length", strconv.Itoa(len(m.Payload)))
 	}
+}
 
-	return p.Write(m.Payload)
+func (h wrpHeader) readHashmap(key hdr, target *map[string]string) {
+	if hashmap := key.Values(h.headers); len(hashmap) > 0 {
+		rv := make(map[string]string)
+		for _, m := range hashmap {
+			pair := strings.SplitN(m, ":", 2)
+			if len(pair) == 2 {
+				key := strings.TrimSpace(pair[0])
+				value := strings.TrimSpace(pair[1])
+				rv[key] = value
+			}
+		}
+		*target = rv
+	}
+}
+
+func (h wrpHeader) readHeaders(key hdr, target *[]string) {
+	if array := key.Values(h.headers); len(array) > 0 {
+		rv := make([]string, 0, len(array))
+		for _, item := range array {
+			if item != "" {
+				rv = append(rv, item)
+			}
+		}
+		*target = rv
+	}
 }
