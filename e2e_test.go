@@ -144,6 +144,7 @@ func TestEncodeDecodeWRPMessages(t *testing.T) {
 						}
 					})
 					t.Run(testName+" Response", func(t *testing.T) {
+						t.Parallel()
 						opts := append(tt.opts, typ.opt, encoding.opt, EncodeValidators(wrp.NoStandardValidation()))
 						// Create an encoder
 						encoder, err := NewEncoder(opts...)

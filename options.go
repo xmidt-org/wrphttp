@@ -34,8 +34,8 @@ func (f optionFunc) apply(e *Encoder) error {
 // parameters.  The default value is false.
 func CompatibilityMode(enabled ...bool) Option {
 	return optionFunc(func(e *Encoder) {
-		enabled = append(enabled, true)
-		e.compatibilityMode = enabled[0]
+		en := append(enabled, true)
+		e.compatibilityMode = en[0]
 	})
 }
 
@@ -76,10 +76,10 @@ func AsMsgpack() Option {
 // If multiple messages are provided, a multipart message is created with
 // each message as a separate part.  The Content-Type of the message is set to
 // "application/wrp+octet-stream".
-func AsOctetStream(headerStyle ...string) Option {
-	headerStyle = append(headerStyle, styleXWebpa)
-	headerStyle[0] = strings.ToLower(headerStyle[0])
-	mt, err := toMediaType(MEDIA_TYPE_OCTET_STREAM, headerStyle[0])
+func AsOctetStream(style ...string) Option {
+	styles := append(style, styleXWebpa)
+	styles[0] = strings.ToLower(styles[0])
+	mt, err := toMediaType(MEDIA_TYPE_OCTET_STREAM, styles[0])
 	if err != nil {
 		return errOption(err)
 	}
@@ -151,9 +151,9 @@ func asType(mt mediaType) Option {
 // EncodeGzip uses the gzip compressor with the specified compression level.
 func EncodeGzip(level ...int) Option {
 	return optionFunc(func(e *Encoder) {
-		level = append(level, gzip.DefaultCompression)
+		levels := append(level, gzip.DefaultCompression)
 		e.compressor = func(w io.Writer) (io.WriteCloser, error) {
-			return gzip.NewWriterLevel(w, level[0])
+			return gzip.NewWriterLevel(w, levels[0])
 		}
 		e.encoding = "gzip"
 	})
@@ -162,9 +162,9 @@ func EncodeGzip(level ...int) Option {
 // EncodeDeflate uses the deflate compressor with the specified compression level.
 func EncodeDeflate(level ...int) Option {
 	return optionFunc(func(e *Encoder) {
-		level = append(level, flate.DefaultCompression)
+		levels := append(level, flate.DefaultCompression)
 		e.compressor = func(w io.Writer) (io.WriteCloser, error) {
-			return flate.NewWriter(w, level[0])
+			return flate.NewWriter(w, levels[0])
 		}
 		e.encoding = "deflate"
 	})
@@ -173,9 +173,9 @@ func EncodeDeflate(level ...int) Option {
 // EncodeZlib uses the zlib compressor with the specified compression level.
 func EncodeZlib(level ...int) Option {
 	return optionFunc(func(e *Encoder) {
-		level = append(level, zlib.DefaultCompression)
+		levels := append(level, zlib.DefaultCompression)
 		e.compressor = func(w io.Writer) (io.WriteCloser, error) {
-			return zlib.NewWriterLevel(w, level[0])
+			return zlib.NewWriterLevel(w, levels[0])
 		}
 		e.encoding = "zlib"
 	})
