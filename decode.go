@@ -142,18 +142,17 @@ func fromPart(h http.Header, body io.ReadCloser, validators ...wrp.Processor) ([
 		defer body.Close()
 	}
 
-	ct, _, err := mime.ParseMediaType(h.Get("Content-Type"))
+	ct, err := toMediaTypeFromMime(h.Get("Content-Type"))
 	if err != nil {
-		return nil, fmt.Errorf("invalid Content-Type: %w", err)
+		return nil, err
 	}
-	ct = strings.TrimPrefix(ct, "multipart/")
 
-	switch mediaType(ct) {
+	switch ct {
 	case mtJSON:
 		return fromFormat(wrp.JSON, body, validators...)
 	case mtMsgpack:
 		return fromFormat(wrp.Msgpack, body, validators...)
-	case mtOctetStream:
+	case mtOctetStream, mtOctetStreamXWebpa, mtOctetStreamXXmidt, mtOctetStreamXMidt, mtOctetStreamXmidt:
 		return fromOctetStream(h, body, validators...)
 	case mtJSONL:
 		return fromJSONL(body, validators...)
@@ -161,6 +160,7 @@ func fromPart(h http.Header, body io.ReadCloser, validators ...wrp.Processor) ([
 		return fromMsgpackL(body, validators...)
 	}
 
+	// Unreachable.
 	return nil, fmt.Errorf("unsupported media type: %s", ct)
 }
 

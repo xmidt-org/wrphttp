@@ -4,9 +4,13 @@
 package wrphttp
 
 import (
+	"bytes"
+	"context"
+	"errors"
 	"io"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -103,57 +107,72 @@ func TestEncodeDecodeWRPMessages(t *testing.T) {
 		{EncodeDeflate(), "EncodeDeflate"},
 		{EncodeZlib(), "EncodeZlib"},
 	}
+
+	compat := []testOption{
+		{CompatibilityMode(), "CompatibilityMode"},
+		{CompatibilityMode(false), "NoCompatibilityMode"},
+	}
 	for _, tt := range tests {
 		for _, typ := range typs {
 			for _, encoding := range encodings {
-				testName := tt.name + " " + typ.name + "." + encoding.name
-				t.Run(testName+" Request", func(t *testing.T) {
-					opts := append(tt.opts, typ.opt, encoding.opt, EncodeValidators(wrp.NoStandardValidation()))
-					// Create an encoder
-					encoder, err := NewEncoder(opts...)
-					require.NoError(t, err)
+				for _, comp := range compat {
+					testName := tt.name + " " + comp.name + "." + typ.name + "." + encoding.name
+					t.Run(testName+" Request", func(t *testing.T) {
+						t.Parallel()
+						opts := append(tt.opts, typ.opt, comp.opt, encoding.opt, EncodeValidators(wrp.NoStandardValidation()))
+						// Create an encoder
+						encoder, err := NewEncoder(opts...)
+						require.NoError(t, err)
 
-					// Encode the messages
-					req, err := encoder.NewRequest(http.MethodPost, "http://example.com", toUnion(tt.messages)...)
-					require.NoError(t, err)
+						// Encode the messages
+						req, err := encoder.NewRequest(http.MethodPost, "http://example.com", toUnion(tt.messages)...)
+						require.NoError(t, err)
 
-					got, err := DecodeRequest(req, wrp.NoStandardValidation())
-					require.NoError(t, err)
-					require.Len(t, got, len(tt.messages))
-					for i, original := range tt.messages {
-						decoded := got[i].(*wrp.Message)
-						assert.Equal(t, original, *decoded)
-					}
-				})
-				t.Run(testName+" Response", func(t *testing.T) {
-					opts := append(tt.opts, typ.opt, encoding.opt, EncodeValidators(wrp.NoStandardValidation()))
-					// Create an encoder
-					encoder, err := NewEncoder(opts...)
-					require.NoError(t, err)
+						ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+						defer cancel()
 
-					// Encode the messages
-					headers, body, err := encoder.ToParts(toUnion(tt.messages)...)
-					require.NoError(t, err)
-					require.NotNil(t, body)
-					require.NotNil(t, headers)
+						req, err = materializeRequest(ctx, req)
+						require.NoError(t, err)
+						require.NotNil(t, req)
 
-					// Simulate sending the request
-					resp := &http.Response{
-						Header: headers,
-						Body:   io.NopCloser(body),
-					}
+						got, err := DecodeRequest(req, wrp.NoStandardValidation())
+						require.NoError(t, err)
+						require.Len(t, got, len(tt.messages))
+						for i, original := range tt.messages {
+							decoded := got[i].(*wrp.Message)
+							assert.Equal(t, original, *decoded)
+						}
+					})
+					t.Run(testName+" Response", func(t *testing.T) {
+						opts := append(tt.opts, typ.opt, encoding.opt, EncodeValidators(wrp.NoStandardValidation()))
+						// Create an encoder
+						encoder, err := NewEncoder(opts...)
+						require.NoError(t, err)
 
-					// Decode the messages
-					decodedMessages, err := DecodeResponse(resp, wrp.NoStandardValidation())
-					require.NoError(t, err)
+						// Encode the messages
+						headers, body, err := encoder.ToParts(toUnion(tt.messages)...)
+						require.NoError(t, err)
+						require.NotNil(t, body)
+						require.NotNil(t, headers)
 
-					// Compare the original and decoded messages
-					require.Len(t, decodedMessages, len(tt.messages))
-					for i, original := range tt.messages {
-						decoded := decodedMessages[i].(*wrp.Message)
-						assert.Equal(t, original, *decoded)
-					}
-				})
+						// Simulate sending the request
+						resp := &http.Response{
+							Header: headers,
+							Body:   io.NopCloser(body),
+						}
+
+						// Decode the messages
+						decodedMessages, err := DecodeResponse(resp, wrp.NoStandardValidation())
+						require.NoError(t, err)
+
+						// Compare the original and decoded messages
+						require.Len(t, decodedMessages, len(tt.messages))
+						for i, original := range tt.messages {
+							decoded := decodedMessages[i].(*wrp.Message)
+							assert.Equal(t, original, *decoded)
+						}
+					})
+				}
 			}
 		}
 	}
@@ -166,4 +185,58 @@ func toUnion(messages []wrp.Message) []wrp.Union {
 		unions[i] = &msg
 	}
 	return unions
+}
+
+// This separates the encoding of the request from handling the request.  This
+// helps determine if encoding or decoding is the issue.  Otherwise it is safe
+// to use the encoder directly on the request & this is a no-op.
+func materializeRequest(ctx context.Context, req *http.Request) (*http.Request, error) {
+	if req.Body == nil {
+		return req, nil
+	}
+
+	// Use a cancellable reader
+	bodyReader := req.Body
+	defer bodyReader.Close()
+
+	pipeReader, pipeWriter := io.Pipe()
+
+	// Copy body into a buffer through a pipe, watching for context cancellation
+	go func() {
+		defer pipeWriter.Close()
+
+		_, err := io.Copy(pipeWriter, bodyReader)
+		if err != nil {
+			pipeWriter.CloseWithError(err)
+		}
+	}()
+
+	var buf bytes.Buffer
+	copyDone := make(chan error, 1)
+
+	go func() {
+		_, err := io.Copy(&buf, pipeReader)
+		copyDone <- err
+	}()
+
+	select {
+	case <-ctx.Done():
+		pipeReader.CloseWithError(ctx.Err())
+		return nil, errors.New("materialize canceled")
+	case err := <-copyDone:
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// Replace the request body
+	req.Body = io.NopCloser(bytes.NewReader(buf.Bytes()))
+	req.ContentLength = int64(buf.Len())
+
+	// Clear Transfer-Encoding if present
+	if req.Header.Get("Transfer-Encoding") == "chunked" {
+		req.Header.Del("Transfer-Encoding")
+	}
+
+	return req, nil
 }

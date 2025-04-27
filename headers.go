@@ -24,6 +24,15 @@ func (h hdr) Get(headers http.Header) string {
 	return ""
 }
 
+func (h hdr) WhichStyle(headers http.Header) string {
+	for i, key := range h {
+		if val := headers.Get(key); val != "" {
+			return orderedStyles[i]
+		}
+	}
+	return ""
+}
+
 func (h hdr) Values(headers http.Header) []string {
 	var values []string
 	for _, key := range h {
@@ -35,21 +44,21 @@ func (h hdr) Values(headers http.Header) []string {
 }
 
 const (
-	styleXXmidt = "X-Xmidt"
-	styleXMidt  = "X-Midt"
-	styleXmidt  = "Xmidt"
-	styleXWebpa = "X-Webpa"
+	styleXXmidt = "x-xmidt" // lowercase version of X-Xmidt
+	styleXMidt  = "x-midt"  // lowercase version of X-Midt
+	styleXmidt  = "xmidt"   // lowercase version of Xmidt
+	styleXWebpa = "x-webpa" // lowercase version of X-Webpa
 )
 
 func (h hdr) As(s string) string {
 	switch s {
-	case "X-Xmidt":
+	case styleXXmidt:
 		return h[0]
-	case "X-Midt":
+	case styleXMidt:
 		return h[1]
-	case "Xmidt":
+	case styleXmidt:
 		return h[2]
-	case "X-Webpa":
+	case styleXWebpa:
 		if len(h) == 4 {
 			return h[3]
 		}
@@ -60,6 +69,8 @@ func (h hdr) As(s string) string {
 }
 
 var (
+	orderedStyles = []string{styleXXmidt, styleXMidt, styleXmidt, styleXWebpa}
+
 	// Ensure the formats are: X-Xmidt, X-Midt, Xmidt, X-Webpa
 	messageTypeHeader     = hdr{"X-Xmidt-Message-Type" /*        */, "X-Midt-Message-Type" /*        */, "Xmidt-Message-Type" /*        */}
 	transactionUuidHeader = hdr{"X-Xmidt-Transaction-Uuid" /*    */, "X-Midt-Transaction-Uuid" /*    */, "Xmidt-Transaction-Uuid" /*    */}
@@ -75,6 +86,7 @@ var (
 	headersHeader         = hdr{"X-Xmidt-Headers" /*             */, "X-Midt-Headers" /*             */, "Xmidt-Headers" /*             */}
 	serviceNameHeader     = hdr{"X-Xmidt-Service-Name" /*        */, "X-Midt-Service-Name" /*        */, "Xmidt-Service-Name" /*        */}
 	urlHeader             = hdr{"X-Xmidt-Url" /*                 */, "X-Midt-Url" /*                 */, "Xmidt-Url" /*                 */}
+	contentTypeHeader     = hdr{"X-Xmidt-Content-Type" /*        */, "X-Midt-Content-Type" /*        */, "Xmidt-Content-Type" /*        */}
 )
 
 func toHeadersForm(msg wrp.Union, typ string, validators ...wrp.Processor) (http.Header, []byte, error) {
@@ -99,6 +111,7 @@ func toHeadersForm(msg wrp.Union, typ string, validators ...wrp.Processor) (http
 	h.toStringHeader(sessionIdHeader, out.SessionID, headers)
 	h.toStringHeader(serviceNameHeader, out.ServiceName, headers)
 	h.toStringHeader(urlHeader, out.URL, headers)
+	h.toStringHeader(contentTypeHeader, out.ContentType, headers)
 	if out.Metadata != nil {
 		for k, v := range out.Metadata {
 			if v != "" {
@@ -143,6 +156,7 @@ func fromHeaders(headers http.Header, body io.ReadCloser, validators ...wrp.Proc
 	h.readStrings(partnerIdHeader, &msg.PartnerIDs)
 	h.readHashmap(metadataHeader, &msg.Metadata)
 	h.readHeaders(headersHeader, &msg.Headers)
+	h.readString(contentTypeHeader, &msg.ContentType)
 
 	if body != nil {
 		payload, err := io.ReadAll(body)

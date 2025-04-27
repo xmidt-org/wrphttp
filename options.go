@@ -9,6 +9,8 @@ import (
 	"compress/zlib"
 	"fmt"
 	"io"
+	"net/http"
+	"strings"
 
 	"github.com/xmidt-org/wrp-go/v5"
 )
@@ -26,6 +28,17 @@ func (f optionFunc) apply(e *Encoder) error {
 	return nil
 }
 
+// CompatibilityMode sets the encoder to use compatibility mode.  This is
+// useful for ensuring that the encoder is compatible with older versions of
+// the WRP protocol that may not support content-type values with the style
+// parameters.  The default value is false.
+func CompatibilityMode(enabled ...bool) Option {
+	return optionFunc(func(e *Encoder) {
+		enabled = append(enabled, true)
+		e.compatibilityMode = enabled[0]
+	})
+}
+
 // AsJSON sets the encoder to use JSON encoding for WRP messages.  A single
 // message is encoded with the body as the wrp.Message encoded as JSON with
 // the Content-Type set to "application/wrp+json".
@@ -34,9 +47,7 @@ func (f optionFunc) apply(e *Encoder) error {
 // message as a separate part.  The Content-Type of the message is set to
 // "application/wrp+json".
 func AsJSON() Option {
-	return optionFunc(func(e *Encoder) {
-		e.mt = mtJSON
-	})
+	return asType(mtJSON)
 }
 
 // AsMsgpack sets the encoder to use Msgpack encoding for WRP messages.  A single
@@ -47,9 +58,7 @@ func AsJSON() Option {
 // message as a separate part.  The Content-Type of the message is set to
 // "application/wrp+msgpack".
 func AsMsgpack() Option {
-	return optionFunc(func(e *Encoder) {
-		e.mt = mtMsgpack
-	})
+	return asType(mtMsgpack)
 }
 
 // AsOctetStream sets the encoder to use octet-stream encoding for WRP messages.
@@ -68,20 +77,13 @@ func AsMsgpack() Option {
 // each message as a separate part.  The Content-Type of the message is set to
 // "application/wrp+octet-stream".
 func AsOctetStream(headerStyle ...string) Option {
-	return optionFuncErr(func(e *Encoder) error {
-		headerStyle = append(headerStyle, styleXWebpa)
-		switch headerStyle[0] {
-		case styleXXmidt, styleXMidt, styleXmidt, styleXWebpa:
-			// valid styles
-		default:
-			return fmt.Errorf("invalid style %q, must be one of %q, %q, %q, %q",
-				headerStyle, styleXXmidt, styleXMidt, styleXmidt, styleXWebpa)
-		}
-
-		e.mt = mtOctetStream
-		e.style = headerStyle[0]
-		return nil
-	})
+	headerStyle = append(headerStyle, styleXWebpa)
+	headerStyle[0] = strings.ToLower(headerStyle[0])
+	mt, err := toMediaType(MEDIA_TYPE_OCTET_STREAM, headerStyle[0])
+	if err != nil {
+		return errOption(err)
+	}
+	return asType(mt)
 }
 
 // AsJSONL sets the encoder to use JSONL encoding for WRP messages.  All provided
@@ -90,9 +92,7 @@ func AsOctetStream(headerStyle ...string) Option {
 // each array of messages as a separate part.  The Content-Type of each part is set to
 // "application/wrp+jsonl".
 func AsJSONL() Option {
-	return optionFunc(func(e *Encoder) {
-		e.mt = mtJSONL
-	})
+	return asType(mtJSONL)
 }
 
 // AsMsgpackL sets the encoder to use MsgpackL encoding for WRP messages.  All provided
@@ -101,8 +101,50 @@ func AsJSONL() Option {
 // each array of messages as a separate part.  The Content-Type of each part is set to
 // "application/wrp+msgpackl".
 func AsMsgpackL() Option {
-	return optionFunc(func(e *Encoder) {
-		e.mt = mtMsgpackL
+	return asType(mtMsgpackL)
+}
+
+// AsNegotiated sets the encoder to use the negotiated media type from the
+// request.  This is useful for ensuring that the encoder is compatible with
+// the negotiated media type from the request.
+func AsNegotiated(r *http.Request) Option {
+	mt, err := negotiatedMediaType(r)
+	if err != nil {
+		return errOption(err)
+	}
+
+	return asType(mt)
+}
+
+// AsMediaType sets the encoder to use the specified media type.  The media type
+func AsMediaType(s string) Option {
+	mt, err := toMediaTypeFromMime(s)
+	if err != nil {
+		return errOption(err)
+	}
+	return asType(mt)
+}
+
+func asType(mt mediaType) Option {
+	return optionFuncErr(func(e *Encoder) error {
+		switch mt {
+		case mtJSON, mtMsgpack, mtJSONL, mtMsgpackL:
+		case mtOctetStream, mtOctetStreamXWebpa:
+			e.style = styleXWebpa
+		case mtOctetStreamXXmidt:
+			e.style = styleXXmidt
+		case mtOctetStreamXMidt:
+			e.style = styleXMidt
+		case mtOctetStreamXmidt:
+			e.style = styleXmidt
+		default:
+			// This should only happen if there is a bug in the code.
+			return fmt.Errorf("invalid media type %q", mt)
+		}
+
+		e.mt = mt
+
+		return nil
 	})
 }
 
@@ -179,5 +221,11 @@ func WithMaxItemsPerChunk(maxItems int) Option {
 			maxItems = 1000
 		}
 		e.maxItems = maxItems
+	})
+}
+
+func errOption(err error) Option {
+	return optionFuncErr(func(e *Encoder) error {
+		return err
 	})
 }
