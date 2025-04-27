@@ -22,12 +22,13 @@ type compressor func(io.Writer) (io.WriteCloser, error)
 // Encoder contains the options used for encoding new http.Request and http.Response
 // objects.  The Encoder is not safe for concurrent use.
 type Encoder struct {
-	mt         mediaType
-	compressor compressor
-	encoding   string
-	validator  []wrp.Processor
-	style      string
-	maxItems   int
+	mt                mediaType
+	compatibilityMode bool
+	compressor        compressor
+	encoding          string
+	validator         []wrp.Processor
+	style             string
+	maxItems          int
 }
 
 // Option is a functional option for configuring the Encoder.  The options are
@@ -51,6 +52,7 @@ func NewEncoder(opts ...Option) (*Encoder, error) {
 		AsMsgpack(),
 		EncodeNoCompression(),
 		WithMaxItemsPerChunk(0),
+		CompatibilityMode(false),
 	}
 
 	opts = append(defaults, opts...)
@@ -110,7 +112,9 @@ func (e *Encoder) ToParts(msgs ...wrp.Union) (http.Header, io.Reader, error) {
 		boundary = e.asFormat(wrp.JSON, pw, msgs...)
 	case mtMsgpack:
 		boundary = e.asFormat(wrp.Msgpack, pw, msgs...)
-	case mtOctetStream:
+	case mtOctetStream,
+		mtOctetStreamXXmidt, mtOctetStreamXMidt,
+		mtOctetStreamXWebpa, mtOctetStreamXmidt:
 		var err error
 		headers, boundary, err = e.asOctetStream(pw, msgs...)
 		if err != nil {
@@ -120,6 +124,9 @@ func (e *Encoder) ToParts(msgs ...wrp.Union) (http.Header, io.Reader, error) {
 		boundary = e.asMsgpackL(pw, msgs...)
 	case mtJSONL:
 		boundary = e.asJSONL(pw, msgs...)
+	default:
+		// Only reachable if there is a logic error in the code.
+		return nil, nil, fmt.Errorf("unsupported media type: %s", e.mt)
 	}
 
 	if boundary != "" {
@@ -405,11 +412,27 @@ func (e *Encoder) asJSONLSingle(pw *io.PipeWriter, msgs ...wrp.Union) {
 
 func (e *Encoder) getHeaders(h ...http.Header) http.Header {
 	h = append(h, make(http.Header, 2))
-	h[0].Set("Content-Type", e.mt.String())
+	h[0].Set("Content-Type", e.getContentType())
 	if e.encoding != "" && e.encoding != "identity" {
 		h[0].Set("Content-Encoding", e.encoding)
 	}
 	return h[0]
+}
+
+// getContentType returns the content type for the encoder.  If compatibilityMode
+// is enabled, the content type is set to "application/octet-stream" for
+// octet-stream media types instead of the specific media type with parameters.
+func (e *Encoder) getContentType() string {
+	if !e.compatibilityMode {
+		return e.mt.String()
+	}
+
+	switch e.mt {
+	case mtOctetStreamXXmidt, mtOctetStreamXmidt, mtOctetStreamXMidt, mtOctetStreamXWebpa:
+		return mtOctetStream.String()
+	}
+
+	return e.mt.String()
 }
 
 type chunked struct {
