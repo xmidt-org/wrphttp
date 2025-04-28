@@ -29,7 +29,7 @@ func TestFrom(t *testing.T) {
 		{
 			name: "valid json",
 			header: http.Header{
-				"Content-Type": []string{"application/wrp+json"},
+				"Content-Type": []string{"application/json"},
 			},
 			body:  `{"msg_type":3,"source":"source"}`,
 			noVal: true,
@@ -44,7 +44,7 @@ func TestFrom(t *testing.T) {
 		{
 			name: "valid octect",
 			header: http.Header{
-				"Content-Type":       []string{"application/wrp+octet-stream"},
+				"Content-Type":       []string{"application/octet-stream"},
 				"Xmidt-Message-Type": []string{"Unknown"},
 			},
 			expected: []wrp.Union{
@@ -61,12 +61,12 @@ func TestFrom(t *testing.T) {
 				"Content-Type": []string{"multipart/mixed; boundary=boundary"},
 			},
 			body: "--boundary\n" +
-				"Content-Type: application/wrp+json\n" +
+				"Content-Type: application/json\n" +
 				"\n" +
 				"{\"msg_type\":3,\"source\":\"source\"}\n" +
 				"\n" +
 				"--boundary\n" +
-				"Content-Type: application/wrp+json\n" +
+				"Content-Type: application/json\n" +
 				"\n" +
 				"{\"msg_type\":4,\"source\":\"source\"}\n" +
 				"\n" +
@@ -104,12 +104,12 @@ func TestFrom(t *testing.T) {
 				"Content-Type": []string{"multipart/invalid; boundary=boundary"},
 			},
 			body: "--boundary\n" +
-				"Content-Type: application/wrp+json\n" +
+				"Content-Type: application/json\n" +
 				"\n" +
 				"{\"msg_type\":3,\"source\":\"source\"}\n" +
 				"\n" +
 				"--boundary\n" +
-				"Content-Type: application/wrp+json\n" +
+				"Content-Type: application/json\n" +
 				"\n" +
 				"{\"msg_type\":4,\"source\":\"source\"}\n" +
 				"\n" +
@@ -123,12 +123,12 @@ func TestFrom(t *testing.T) {
 				"Content-Type": []string{"multipart/mixed; dogs=cats"},
 			},
 			body: "--boundary\n" +
-				"Content-Type: application/wrp+json\n" +
+				"Content-Type: application/json\n" +
 				"\n" +
 				"{\"msg_type\":3,\"source\":\"source\"}\n" +
 				"\n" +
 				"--boundary\n" +
-				"Content-Type: application/wrp+json\n" +
+				"Content-Type: application/json\n" +
 				"\n" +
 				"{\"msg_type\":4,\"source\":\"source\"}\n" +
 				"\n" +
@@ -155,13 +155,13 @@ func TestFrom(t *testing.T) {
 				"Content-Type": []string{"multipart/mixed; boundary=boundary"},
 			},
 			body: "--boundary\n" +
-				"Content-Type: application/wrp+json\n" +
+				"Content-Type: application/json\n" +
 				"Content-Encoding: unknown\n" +
 				"\n" +
 				"{\"msg_type\":3,\"source\":\"source\"}\n" +
 				"\n" +
 				"--boundary\n" +
-				"Content-Type: application/wrp+json\n" +
+				"Content-Type: application/json\n" +
 				"\n" +
 				"{\"msg_type\":4,\"source\":\"source\"}\n" +
 				"\n" +
@@ -175,12 +175,12 @@ func TestFrom(t *testing.T) {
 				"Content-Type": []string{"multipart/mixed; boundary=boundary"},
 			},
 			body: "--boundary\n" +
-				"Content-Type: application/wrp+unknown\n" +
+				"Content-Type: application/unknown\n" +
 				"\n" +
 				"{\"msg_type\":3,\"source\":\"source\"}\n" +
 				"\n" +
 				"--boundary\n" +
-				"Content-Type: application/wrp+json\n" +
+				"Content-Type: application/json\n" +
 				"\n" +
 				"{\"msg_type\":4,\"source\":\"source\"}\n" +
 				"\n" +
@@ -198,7 +198,7 @@ func TestFrom(t *testing.T) {
 				"{\"msg_type\":3,\"source\":\"source\"}\n" +
 				"\n" +
 				"--boundary\n" +
-				"Content-Type: application/wrp+json\n" +
+				"Content-Type: application/json\n" +
 				"\n" +
 				"{\"msg_type\":4,\"source\":\"source\"}\n" +
 				"\n" +
@@ -209,7 +209,7 @@ func TestFrom(t *testing.T) {
 		{
 			name: "json body is invalid",
 			header: http.Header{
-				"Content-Type": []string{"application/wrp+json"},
+				"Content-Type": []string{"application/json"},
 			},
 			body:  "invalid body",
 			noVal: true,
@@ -218,7 +218,7 @@ func TestFrom(t *testing.T) {
 		{
 			name: "jsonl body is invalid",
 			header: http.Header{
-				"Content-Type": []string{"application/wrp+jsonl"},
+				"Content-Type": []string{"application/jsonl"},
 			},
 			body:  "invalid body\n",
 			noVal: true,
@@ -227,7 +227,7 @@ func TestFrom(t *testing.T) {
 		{
 			name: "msgpackl body is invalid",
 			header: http.Header{
-				"Content-Type": []string{"application/wrp+msgpackl"},
+				"Content-Type": []string{"application/msgpackl"},
 			},
 			body:  "invalid body\n",
 			noVal: true,
@@ -236,7 +236,7 @@ func TestFrom(t *testing.T) {
 		{
 			name: "msgpackl length is bogus",
 			header: http.Header{
-				"Content-Type": []string{"application/wrp+msgpackl"},
+				"Content-Type": []string{"application/msgpackl"},
 			},
 			body:  string([]byte{0x94, 0xFF}),
 			noVal: true,
@@ -245,7 +245,7 @@ func TestFrom(t *testing.T) {
 		{
 			name: "invalid octect",
 			header: http.Header{
-				"Content-Type":       []string{"application/wrp+octet-stream"},
+				"Content-Type":       []string{"application/octet-stream"},
 				"Xmidt-Message-Type": []string{"Unknown"},
 				"Xmidt-Status":       []string{"1"},
 				"Xmidt-URL":          []string{"url"},

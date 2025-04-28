@@ -21,12 +21,12 @@ func TestNegotiatedMediaType(t *testing.T) {
 	}{
 		{
 			name:   "Exact match JSON",
-			accept: "application/wrp+json",
+			accept: "application/json",
 			want:   MEDIA_TYPE_JSON,
 		},
 		{
 			name:   "Exact match Msgpack",
-			accept: "application/wrp+msgpack",
+			accept: "application/msgpack",
 			want:   MEDIA_TYPE_MSGPACK,
 		},
 		{
@@ -42,24 +42,24 @@ func TestNegotiatedMediaType(t *testing.T) {
 		},
 		{
 			name:   "Multiple types prefer JSONL",
-			accept: "application/wrp+jsonl;q=0.9, application/wrp+msgpack;q=0.8",
+			accept: "application/jsonl;q=0.9, application/msgpack;q=0.8",
 			want:   MEDIA_TYPE_JSONL,
 		},
 		{
 			name:   "Multiple types prefer JSONL",
-			accept: "application/wrp+json;q=0.2, application/wrp+jsonl;q=0.8",
+			accept: "application/json;q=0.2, application/jsonl;q=0.8",
 			want:   MEDIA_TYPE_JSONL,
 		},
 		{
 			name:   "No Accept header falls back to content type",
 			accept: "",
-			ct:     "application/wrp+json",
+			ct:     "application/json",
 			want:   MEDIA_TYPE_JSON,
 		},
 		{
 			name:   "No Accept header falls back to content type, and X-Webpa-Device-Name",
 			accept: "",
-			ct:     "application/wrp+octet-stream",
+			ct:     "application/octet-stream",
 			want:   MEDIA_TYPE_OCTET_STREAM_WEBPA_STYLE,
 			headers: http.Header{
 				"X-Webpa-Device-Name": []string{"ignored"},
@@ -68,7 +68,7 @@ func TestNegotiatedMediaType(t *testing.T) {
 		{
 			name:   "No Accept header falls back to content type, and X-Xmidt-Message-Type",
 			accept: "",
-			ct:     "application/wrp+octet-stream",
+			ct:     "application/octet-stream",
 			want:   MEDIA_TYPE_OCTET_STREAM_WEBPA_STYLE,
 			headers: http.Header{
 				"X-Xmidt-Message-Type": []string{"ignored"},
@@ -77,7 +77,7 @@ func TestNegotiatedMediaType(t *testing.T) {
 		{
 			name:   "No Accept header falls back to content type, and Xmidt-Message-Type",
 			accept: "",
-			ct:     "application/wrp+octet-stream",
+			ct:     "application/octet-stream",
 			want:   MEDIA_TYPE_OCTET_STREAM_XMIDT_STYLE,
 			headers: http.Header{
 				"Xmidt-Message-Type": []string{"ignored"},
@@ -86,7 +86,7 @@ func TestNegotiatedMediaType(t *testing.T) {
 		{
 			name:   "No Accept header falls back to content type, and X-Webpa-Device-Name",
 			accept: "",
-			ct:     "application/wrp+octet-stream",
+			ct:     "application/octet-stream",
 			want:   MEDIA_TYPE_OCTET_STREAM_WEBPA_STYLE,
 			headers: http.Header{
 				"X-Webpa-Device-Name": []string{"ignored"},
@@ -94,8 +94,8 @@ func TestNegotiatedMediaType(t *testing.T) {
 		},
 		{
 			name:   "Accept header with style parameter",
-			accept: "application/wrp+octet-stream; style=x-xmidt",
-			ct:     "application/wrp+msgpack",
+			accept: "application/octet-stream; style=x-xmidt",
+			ct:     "application/msgpack",
 			want:   MEDIA_TYPE_OCTET_STREAM_X_XMIDT_STYLE,
 		},
 
@@ -109,12 +109,12 @@ func TestNegotiatedMediaType(t *testing.T) {
 		{
 			name:        "No Accept header falls back to content type, is invalid",
 			accept:      "",
-			ct:          "/wrp+json",
+			ct:          "/json",
 			expectError: true,
 		},
 		{
 			name:        "Invalid Accept header",
-			accept:      "/wrp+json",
+			accept:      "/json",
 			expectError: true,
 		},
 		{

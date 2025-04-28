@@ -13,17 +13,17 @@ import (
 type mediaType string
 
 const (
-	MEDIA_TYPE_JSON         = "application/wrp+json"
-	MEDIA_TYPE_MSGPACK      = "application/wrp+msgpack"
-	MEDIA_TYPE_OCTET_STREAM = "application/wrp+octet-stream"
-	MEDIA_TYPE_JSONL        = "application/wrp+jsonl"
-	MEDIA_TYPE_MSGPACKL     = "application/wrp+msgpackl"
+	MEDIA_TYPE_JSON         = "application/json"
+	MEDIA_TYPE_MSGPACK      = "application/msgpack"
+	MEDIA_TYPE_OCTET_STREAM = "application/octet-stream"
+	MEDIA_TYPE_JSONL        = "application/jsonl"
+	MEDIA_TYPE_MSGPACKL     = "application/msgpackl"
 
 	// These are the styles that are supported for octet-stream
-	MEDIA_TYPE_OCTET_STREAM_X_XMIDT_STYLE = "application/wrp+octet-stream; style=x-xmidt"
-	MEDIA_TYPE_OCTET_STREAM_X_MIDT_STYLE  = "application/wrp+octet-stream; style=x-midt"
-	MEDIA_TYPE_OCTET_STREAM_XMIDT_STYLE   = "application/wrp+octet-stream; style=xmidt"
-	MEDIA_TYPE_OCTET_STREAM_WEBPA_STYLE   = "application/wrp+octet-stream; style=x-webpa"
+	MEDIA_TYPE_OCTET_STREAM_X_XMIDT_STYLE = "application/octet-stream; style=x-xmidt"
+	MEDIA_TYPE_OCTET_STREAM_X_MIDT_STYLE  = "application/octet-stream; style=x-midt"
+	MEDIA_TYPE_OCTET_STREAM_XMIDT_STYLE   = "application/octet-stream; style=xmidt"
+	MEDIA_TYPE_OCTET_STREAM_WEBPA_STYLE   = "application/octet-stream; style=x-webpa"
 
 	mtUnknown           mediaType = ""
 	mtJSON              mediaType = MEDIA_TYPE_JSON

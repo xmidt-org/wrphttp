@@ -45,7 +45,7 @@ func TestNewEncoder(t *testing.T) {
 				AsNegotiated(&http.Request{
 					Header: http.Header{
 						"Accept": []string{
-							"application/wrp+msgpack",
+							"application/msgpack",
 						},
 					},
 				}),
