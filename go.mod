@@ -4,7 +4,7 @@ go 1.24.1
 
 require (
 	github.com/stretchr/testify v1.11.1
-	github.com/tinylib/msgp v1.5.0
+	github.com/tinylib/msgp v1.6.1
 	github.com/xmidt-org/wrp-go/v5 v5.4.0
 )
 
