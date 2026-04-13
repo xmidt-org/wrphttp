@@ -48,7 +48,7 @@ type Option interface {
 func NewEncoder(opts ...Option) (*Encoder, error) {
 	var encoder Encoder
 
-	defaults := []Option{
+	defaults := []Option{ // nolint:prealloc
 		AsMsgpack(),
 		EncodeNoCompression(),
 		WithMaxItemsPerChunk(0),
