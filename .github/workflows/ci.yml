@@ -21,7 +21,7 @@ on:
 jobs:
   ci:
     # yamllint disable-line
-    uses: xmidt-org/shared-go/.github/workflows/ci.yml@2b9dd377731fc812fba09296b6c3bf5f9e6664ff # v4.13.1
+    uses: xmidt-org/shared-go/.github/workflows/ci.yml@2509319c8d4ee49bbc97796f041c620ef9c41832 # v4.13.5
     with:
       release-type:   library
       yaml-lint-skip: false
