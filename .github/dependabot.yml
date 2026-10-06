@@ -26,3 +26,14 @@ updates:
       prefix: "chore"
       include: "scope"
     open-pull-requests-limit: 10
+
+  - package-ecosystem: gomod
+    directory: /compat
+    schedule:
+      interval: daily
+    labels:
+      - "dependencies"
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+    open-pull-requests-limit: 10
