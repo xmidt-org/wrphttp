@@ -26,3 +26,24 @@ jobs:
       release-type:   library
       yaml-lint-skip: false
     secrets: inherit
+
+  # The compat module checks interop with wrp-go/v3/wrphttp.  It is a separate
+  # module so the v3 dependencies stay out of this one, so the shared workflow
+  # does not run it.
+  compat:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: compat/go.mod
+          cache-dependency-path: compat/go.sum
+
+      - name: Test
+        working-directory: compat
+        run: go test -v ./...

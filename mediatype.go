@@ -67,7 +67,17 @@ var (
 	}
 )
 
+// mtAliases maps deprecated media types still accepted by wrp-go/v3 to the
+// media type they mean.  They are accepted, but never produced.
+var mtAliases = map[string]string{
+	"application/wrp": MEDIA_TYPE_MSGPACK,
+}
+
 func toMediaType(mt, style string) (mediaType, error) {
+	if alias, ok := mtAliases[mt]; ok {
+		mt = alias
+	}
+
 	got, ok := mtFromString[mt]
 	if !ok {
 		return mtUnknown, fmt.Errorf("unsupported media type: %s", mt)

@@ -28,54 +28,50 @@ func (f optionFunc) apply(e *Encoder) error {
 	return nil
 }
 
-// CompatibilityMode sets the encoder to use compatibility mode.  This is
-// useful for ensuring that the encoder is compatible with older versions of
-// the WRP protocol that may not support content-type values with the style
-// parameters.  The default value is false.
-func CompatibilityMode(enabled ...bool) Option {
-	return optionFunc(func(e *Encoder) {
-		en := append(enabled, true)
-		e.compatibilityMode = en[0]
-	})
+// CompatibilityMode does nothing.  Header form messages are always encoded
+// the way wrp-go/v3 expects.
+//
+// Deprecated: The encoder is always compatible, so this is no longer needed.
+func CompatibilityMode(...bool) Option {
+	return optionFunc(func(*Encoder) {})
 }
 
 // AsJSON sets the encoder to use JSON encoding for WRP messages.  A single
 // message is encoded with the body as the wrp.Message encoded as JSON with
-// the Content-Type set to "application/wrp+json".
+// the Content-Type set to "application/json".
 //
 // If multiple messages are provided, a multipart message is created with each
-// message as a separate part.  The Content-Type of the message is set to
-// "application/wrp+json".
+// message as a separate part.  The Content-Type of each part is set to
+// "application/json".
 func AsJSON() Option {
 	return asType(mtJSON)
 }
 
 // AsMsgpack sets the encoder to use Msgpack encoding for WRP messages.  A single
 // message is encoded with the body as the wrp.Message encoded as Msgpack with
-// the Content-Type set to "application/wrp+msgpack".
+// the Content-Type set to "application/msgpack".
 //
 // If multiple messages are provided, a multipart message is created with each
-// message as a separate part.  The Content-Type of the message is set to
-// "application/wrp+msgpack".
+// message as a separate part.  The Content-Type of each part is set to
+// "application/msgpack".
 func AsMsgpack() Option {
 	return asType(mtMsgpack)
 }
 
-// AsOctetStream sets the encoder to use octet-stream encoding for WRP messages.
-// This is useful for raw payloads without any encoding and the additional
-// wrp fields as headers.  The optional style parameter can be used to specify
-// the style of the header.
+// AsOctetStream sets the encoder to use header form for WRP messages: the
+// payload is the body and the other wrp fields are headers.  The optional
+// style parameter can be used to specify the style of the header.
 //
 // The valid styles are:
 //   - "X-Xmidt"
 //   - "X-Midt"
 //   - "Xmidt"
-//   - "X-Webpa" default & best for backward compatibility
+//   - "X-Webpa" default & the only style wrp-go/v3 can read
 //
-// The Content-Type of the message is set to "application/wrp+octet-stream".
-// If multiple messages are provided, a multipart message is created with
-// each message as a separate part.  The Content-Type of the message is set to
-// "application/wrp+octet-stream".
+// Like wrp-go/v3, the Content-Type is the payload's type, or
+// "application/octet-stream" if the message has none.  If multiple messages
+// are provided, a multipart message is created with each message as a
+// separate part.
 func AsOctetStream(style ...string) Option {
 	styles := append(style, styleXWebpa)
 	styles[0] = strings.ToLower(styles[0])
@@ -90,7 +86,7 @@ func AsOctetStream(style ...string) Option {
 // messages are encoded as a single JSONL document up until the MaxItemsPerChunk()
 // limit is reached.  If the limit is reached, a multipart message is created with
 // each array of messages as a separate part.  The Content-Type of each part is set to
-// "application/wrp+jsonl".
+// "application/jsonl".
 func AsJSONL() Option {
 	return asType(mtJSONL)
 }
@@ -99,7 +95,7 @@ func AsJSONL() Option {
 // messages are encoded as a single MsgpackL document up until the MaxItemsPerChunk()
 // limit is reached.  If the limit is reached, a multipart message is created with
 // each array of messages as a separate part.  The Content-Type of each part is set to
-// "application/wrp+msgpackl".
+// "application/msgpackl".
 func AsMsgpackL() Option {
 	return asType(mtMsgpackL)
 }
