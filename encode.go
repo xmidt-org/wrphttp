@@ -22,13 +22,12 @@ type compressor func(io.Writer) (io.WriteCloser, error)
 // Encoder contains the options used for encoding new http.Request and http.Response
 // objects.  The Encoder is not safe for concurrent use.
 type Encoder struct {
-	mt                mediaType
-	compatibilityMode bool
-	compressor        compressor
-	encoding          string
-	validator         []wrp.Processor
-	style             string
-	maxItems          int
+	mt         mediaType
+	compressor compressor
+	encoding   string
+	validator  []wrp.Processor
+	style      string
+	maxItems   int
 }
 
 // Option is a functional option for configuring the Encoder.  The options are
@@ -52,7 +51,6 @@ func NewEncoder(opts ...Option) (*Encoder, error) {
 		AsMsgpack(),
 		EncodeNoCompression(),
 		WithMaxItemsPerChunk(0),
-		CompatibilityMode(false),
 	}
 
 	opts = append(defaults, opts...)
@@ -234,7 +232,7 @@ func (e *Encoder) asOctetStreamSingle(pw *io.PipeWriter, msgs ...wrp.Union) (htt
 		pw.Close()
 	}()
 
-	return e.getHeaders(headers), nil
+	return e.getHeaderFormHeaders(headers), nil
 }
 
 func (e *Encoder) asOctetStreamMultiPart(pw *io.PipeWriter, msgs ...wrp.Union) (http.Header, string, error) {
@@ -254,7 +252,7 @@ func (e *Encoder) asOctetStreamMultiPart(pw *io.PipeWriter, msgs ...wrp.Union) (
 			headers, payload, err := toHeadersForm(msg, e.style, e.validator...)
 			if err == nil {
 				var part io.Writer
-				headers = e.getHeaders(headers)
+				headers = e.getHeaderFormHeaders(headers)
 				part, err = mw.CreatePart(textproto.MIMEHeader(headers))
 				if err == nil {
 					var cw io.WriteCloser
@@ -412,27 +410,26 @@ func (e *Encoder) asJSONLSingle(pw *io.PipeWriter, msgs ...wrp.Union) {
 
 func (e *Encoder) getHeaders(h ...http.Header) http.Header {
 	h = append(h, make(http.Header, 2))
-	h[0].Set("Content-Type", e.getContentType())
+	h[0].Set("Content-Type", e.mt.String())
 	if e.encoding != "" && e.encoding != "identity" {
 		h[0].Set("Content-Encoding", e.encoding)
 	}
 	return h[0]
 }
 
-// getContentType returns the content type for the encoder.  If compatibilityMode
-// is enabled, the content type is set to "application/octet-stream" for
-// octet-stream media types instead of the specific media type with parameters.
-func (e *Encoder) getContentType() string {
-	if !e.compatibilityMode {
-		return e.mt.String()
+// getHeaderFormHeaders returns the headers for a header form message.  Like
+// wrp-go/v3, the Content-Type is the payload's type, defaulting to
+// octet-stream.  The decoder recognizes header form by the message type
+// header, so no other marker is needed.
+func (e *Encoder) getHeaderFormHeaders(h http.Header) http.Header {
+	ct := h.Get(contentTypeHeader.As(e.style))
+	if ct == "" {
+		ct = MEDIA_TYPE_OCTET_STREAM
 	}
 
-	switch e.mt {
-	case mtOctetStreamXXmidt, mtOctetStreamXmidt, mtOctetStreamXMidt, mtOctetStreamXWebpa:
-		return mtOctetStream.String()
-	}
-
-	return e.mt.String()
+	h = e.getHeaders(h)
+	h.Set("Content-Type", ct)
+	return h
 }
 
 type chunked struct {

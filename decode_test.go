@@ -4,7 +4,9 @@
 package wrphttp
 
 import (
+	"bytes"
 	"io"
+	"maps"
 	"net/http"
 	"strings"
 	"testing"
@@ -301,6 +303,127 @@ func TestFrom(t *testing.T) {
 					assert.Equal(t, test.expected, result)
 				}
 			})
+		})
+	}
+}
+
+// TestDecodeV3Forms covers the forms produced by wrp-go/v3/wrphttp.
+func TestDecodeV3Forms(t *testing.T) {
+	msg := wrp.Message{
+		Type:            wrp.SimpleEventMessageType,
+		Source:          "dns:source.example.com",
+		Destination:     "mac:112233445566",
+		TransactionUUID: "uuid",
+	}
+	var msgpack bytes.Buffer
+	require.NoError(t, wrp.Msgpack.Encoder(&msgpack).Encode(&msg))
+
+	headerForm := func(extra http.Header) http.Header {
+		h := http.Header{
+			"X-Xmidt-Message-Type": []string{"SimpleEvent"},
+			"X-Xmidt-Source":       []string{"dns:source.example.com"},
+			"X-Webpa-Device-Name":  []string{"mac:112233445566"},
+		}
+		maps.Copy(h, extra)
+		return h
+	}
+	headerMsg := func(ct string, payload []byte, md map[string]string) *wrp.Message {
+		return &wrp.Message{
+			Type:        wrp.SimpleEventMessageType,
+			Source:      "dns:source.example.com",
+			Destination: "mac:112233445566",
+			ContentType: ct,
+			Payload:     payload,
+			Metadata:    md,
+		}
+	}
+
+	tests := []struct {
+		name     string
+		header   http.Header
+		body     string
+		expected wrp.Union
+	}{
+		{
+			name:     "no Content-Type defaults to msgpack",
+			header:   http.Header{},
+			body:     msgpack.String(),
+			expected: &msg,
+		}, {
+			name:     "deprecated application/wrp is msgpack",
+			header:   http.Header{"Content-Type": []string{"application/wrp"}},
+			body:     msgpack.String(),
+			expected: &msg,
+		}, {
+			name:     "header form with a json payload",
+			header:   headerForm(http.Header{"Content-Type": {"application/json"}}),
+			body:     `{"hello":"world"}`,
+			expected: headerMsg("application/json", []byte(`{"hello":"world"}`), nil),
+		}, {
+			name:     "header form with a plain octet-stream payload",
+			header:   headerForm(http.Header{"Content-Type": {"application/octet-stream"}}),
+			body:     "bytes",
+			expected: headerMsg("", []byte("bytes"), nil),
+		}, {
+			name:     "header form with a styled octet-stream envelope",
+			header:   headerForm(http.Header{"Content-Type": {"application/octet-stream; style=x-webpa"}}),
+			body:     "bytes",
+			expected: headerMsg("", []byte("bytes"), nil),
+		}, {
+			name: "header form content type header wins",
+			header: headerForm(http.Header{
+				"Content-Type":         {"application/octet-stream; style=x-webpa"},
+				"X-Xmidt-Content-Type": {"text/plain"},
+			}),
+			body:     "bytes",
+			expected: headerMsg("text/plain", []byte("bytes"), nil),
+		}, {
+			name:     "header form without Content-Type or payload",
+			header:   headerForm(nil),
+			expected: headerMsg("", []byte{}, nil),
+		}, {
+			name: "header form with legacy X-Midt-Msg-Type",
+			header: http.Header{
+				"Content-Type":        []string{"application/octet-stream"},
+				"X-Midt-Msg-Type":     []string{"SimpleEvent"},
+				"X-Midt-Source":       []string{"dns:source.example.com"},
+				"X-Webpa-Device-Name": []string{"mac:112233445566"},
+			},
+			body:     "bytes",
+			expected: headerMsg("", []byte("bytes"), nil),
+		}, {
+			name: "metadata in v3 key=value form",
+			header: headerForm(http.Header{
+				"X-Xmidt-Metadata": {"/boot-time=123", "url=http://example.com/a=b"},
+			}),
+			expected: headerMsg("", []byte{}, map[string]string{
+				"/boot-time": "123",
+				"url":        "http://example.com/a=b",
+			}),
+		}, {
+			name:     "metadata as a comma separated list",
+			header:   headerForm(http.Header{"X-Xmidt-Metadata": {"a=1, b=2,c"}}),
+			expected: headerMsg("", []byte{}, map[string]string{"a": "1", "b": "2", "c": ""}),
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			req := http.Request{
+				Header: test.header,
+				Body:   io.NopCloser(strings.NewReader(test.body)),
+			}
+			got, err := DecodeRequest(&req)
+			require.NoError(t, err)
+			assert.Equal(t, []wrp.Union{test.expected}, got)
+
+			resp := http.Response{
+				Header: test.header,
+				Body:   io.NopCloser(strings.NewReader(test.body)),
+			}
+			got, err = DecodeResponse(&resp)
+			require.NoError(t, err)
+			assert.Equal(t, []wrp.Union{test.expected}, got)
 		})
 	}
 }

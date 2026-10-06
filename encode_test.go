@@ -266,6 +266,28 @@ func TestAsParts(t *testing.T) {
 }
 
 func TestEncodeRequests(t *testing.T) {
+	jsonMsg := testWRPMessages[0]
+	jsonMsg.ContentType = "application/json"
+
+	partTypes := func(t *testing.T, req *http.Request) (types, encodings []string) {
+		require.True(t, strings.HasPrefix(
+			strings.TrimSpace(req.Header.Get("Content-Type")),
+			"multipart/mixed;"))
+
+		mp, err := req.MultipartReader()
+		require.NoError(t, err)
+
+		for {
+			part, err := mp.NextPart()
+			if err == io.EOF {
+				return types, encodings
+			}
+			require.NoError(t, err)
+			types = append(types, part.Header.Get("Content-Type"))
+			encodings = append(encodings, part.Header.Get("Content-Encoding"))
+		}
+	}
+
 	tests := []struct {
 		name  string
 		opts  []Option
@@ -274,149 +296,66 @@ func TestEncodeRequests(t *testing.T) {
 		err   bool
 	}{
 		{
-			name: "encode the parameter in the content type",
+			name: "header form sends the payload type, like wrp-go/v3",
+			opts: []Option{
+				EncodeValidators(wrp.NoStandardValidation()),
+				AsOctetStream(),
+			},
+			msgs: []wrp.Message{jsonMsg},
+			check: func(t *testing.T, req *http.Request) {
+				assert.Equal(t, "application/json", req.Header.Get("Content-Type"))
+				assert.Equal(t, "application/json", req.Header.Get("X-Xmidt-Content-Type"))
+			},
+		},
+		{
+			name: "header form without a payload type is octet-stream",
+			opts: []Option{
+				EncodeValidators(wrp.NoStandardValidation()),
+				AsMediaType(MEDIA_TYPE_OCTET_STREAM_XMIDT_STYLE),
+			},
+			msgs: []wrp.Message{testWRPMessages[0]},
+			check: func(t *testing.T, req *http.Request) {
+				assert.Equal(t, MEDIA_TYPE_OCTET_STREAM, req.Header.Get("Content-Type"))
+				assert.Empty(t, req.Header.Get("X-Xmidt-Content-Type"))
+			},
+		},
+		{
+			name: "header form sends each part's payload type, multiple messages",
 			opts: []Option{
 				EncodeValidators(wrp.NoStandardValidation()),
 				AsMediaType(MEDIA_TYPE_OCTET_STREAM_WEBPA_STYLE),
 			},
-			msgs: []wrp.Message{
-				testWRPMessages[0],
-			},
+			msgs: []wrp.Message{jsonMsg, testWRPMessages[0]},
 			check: func(t *testing.T, req *http.Request) {
-				assert.Equal(t, MEDIA_TYPE_OCTET_STREAM_WEBPA_STYLE, req.Header.Get("Content-Type"))
+				types, encodings := partTypes(t, req)
+				assert.Equal(t, []string{"application/json", MEDIA_TYPE_OCTET_STREAM}, types)
+				assert.Equal(t, []string{"", ""}, encodings)
 			},
 		},
 		{
-			name: "encode the parameter in the content type, multiple messages",
-			opts: []Option{
-				EncodeValidators(wrp.NoStandardValidation()),
-				AsMediaType(MEDIA_TYPE_OCTET_STREAM_WEBPA_STYLE),
-			},
-			msgs: []wrp.Message{
-				testWRPMessages[0],
-				testWRPMessages[0],
-			},
-			check: func(t *testing.T, req *http.Request) {
-				assert.True(t, strings.HasPrefix(
-					strings.TrimSpace(
-						req.Header.Get("Content-Type"),
-					),
-					"multipart/mixed;"))
-
-				mp, err := req.MultipartReader()
-				require.NoError(t, err)
-
-				var count int
-				for {
-					part, err := mp.NextPart()
-					if err == io.EOF {
-						break
-					}
-					require.NoError(t, err)
-					assert.Equal(t, MEDIA_TYPE_OCTET_STREAM_WEBPA_STYLE, part.Header.Get("Content-Type"))
-					assert.Empty(t, part.Header.Get("Content-Encoding"))
-					count++
-				}
-
-				assert.Equal(t, 2, count)
-			},
-		},
-		{
-			name: "encode the parameter in the content type, multiple messages, gzip",
+			name: "header form sends each part's payload type, multiple messages, gzip",
 			opts: []Option{
 				EncodeValidators(wrp.NoStandardValidation()),
 				AsMediaType(MEDIA_TYPE_OCTET_STREAM_XMIDT_STYLE),
 				EncodeGzip(),
 			},
-			msgs: []wrp.Message{
-				testWRPMessages[0],
-				testWRPMessages[0],
-			},
+			msgs: []wrp.Message{testWRPMessages[0], testWRPMessages[0]},
 			check: func(t *testing.T, req *http.Request) {
-				assert.True(t, strings.HasPrefix(
-					strings.TrimSpace(
-						req.Header.Get("Content-Type"),
-					),
-					"multipart/mixed;"))
-
-				mp, err := req.MultipartReader()
-				require.NoError(t, err)
-
-				var count int
-				for {
-					part, err := mp.NextPart()
-					if err == io.EOF {
-						break
-					}
-					require.NoError(t, err)
-					assert.Equal(t, MEDIA_TYPE_OCTET_STREAM_XMIDT_STYLE, part.Header.Get("Content-Type"))
-					assert.Equal(t, "gzip", part.Header.Get("Content-Encoding"))
-					count++
-				}
-
-				assert.Equal(t, 2, count)
+				types, encodings := partTypes(t, req)
+				assert.Equal(t, []string{MEDIA_TYPE_OCTET_STREAM, MEDIA_TYPE_OCTET_STREAM}, types)
+				assert.Equal(t, []string{"gzip", "gzip"}, encodings)
 			},
 		},
 		{
-			name: "don't encode the parameter in the content type in compatibility mode",
+			name: "compatibility mode no longer changes anything",
 			opts: []Option{
 				CompatibilityMode(),
 				EncodeValidators(wrp.NoStandardValidation()),
-				AsMediaType(MEDIA_TYPE_OCTET_STREAM_WEBPA_STYLE),
+				AsOctetStream(),
 			},
-			msgs: []wrp.Message{
-				testWRPMessages[0],
-			},
+			msgs: []wrp.Message{jsonMsg},
 			check: func(t *testing.T, req *http.Request) {
-				assert.Equal(t, MEDIA_TYPE_OCTET_STREAM, req.Header.Get("Content-Type"))
-			},
-		},
-		{
-			name: "don't encode the parameter in the content type when using the naked octet stream",
-			opts: []Option{
-				EncodeValidators(wrp.NoStandardValidation()),
-				AsMediaType(MEDIA_TYPE_OCTET_STREAM),
-			},
-			msgs: []wrp.Message{
-				testWRPMessages[0],
-			},
-			check: func(t *testing.T, req *http.Request) {
-				assert.Equal(t, MEDIA_TYPE_OCTET_STREAM, req.Header.Get("Content-Type"))
-			},
-		},
-		{
-			name: "don't encode the parameter in the content type in compatibility mode, multiple messages",
-			opts: []Option{
-				CompatibilityMode(),
-				EncodeValidators(wrp.NoStandardValidation()),
-				AsMediaType(MEDIA_TYPE_OCTET_STREAM_XMIDT_STYLE),
-			},
-			msgs: []wrp.Message{
-				testWRPMessages[0],
-				testWRPMessages[0],
-			},
-			check: func(t *testing.T, req *http.Request) {
-				assert.True(t, strings.HasPrefix(
-					strings.TrimSpace(
-						req.Header.Get("Content-Type"),
-					),
-					"multipart/mixed;"))
-
-				mp, err := req.MultipartReader()
-				require.NoError(t, err)
-
-				var count int
-				for {
-					part, err := mp.NextPart()
-					if err == io.EOF {
-						break
-					}
-					require.NoError(t, err)
-					assert.Equal(t, MEDIA_TYPE_OCTET_STREAM, part.Header.Get("Content-Type"))
-					count++
-				}
-
-				assert.Equal(t, 2, count)
+				assert.Equal(t, "application/json", req.Header.Get("Content-Type"))
 			},
 		},
 	}

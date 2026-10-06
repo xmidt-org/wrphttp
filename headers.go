@@ -6,6 +6,7 @@ package wrphttp
 import (
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"strconv"
 	"strings"
@@ -89,6 +90,35 @@ var (
 	contentTypeHeader     = hdr{"X-Xmidt-Content-Type" /*        */, "X-Midt-Content-Type" /*        */, "Xmidt-Content-Type" /*        */}
 )
 
+// legacyMessageTypeHeader is the deprecated message type header that
+// wrp-go/v3 still accepts.  It does not follow the naming of any style, so it
+// is only ever read.
+const legacyMessageTypeHeader = "X-Midt-Msg-Type"
+
+func getMessageType(headers http.Header) string {
+	if msgType := messageTypeHeader.Get(headers); msgType != "" {
+		return msgType
+	}
+	return headers.Get(legacyMessageTypeHeader)
+}
+
+// isHeaderForm reports whether the WRP fields are carried in the headers.
+func isHeaderForm(headers http.Header) bool {
+	return getMessageType(headers) != ""
+}
+
+// payloadContentType returns the media type of a header form payload when it
+// is not explicitly provided.  Like wrp-go/v3, the Content-Type describes the
+// payload.  An octet-stream Content-Type is treated as unspecified since it is
+// both what an empty content type means and the envelope this package uses.
+func payloadContentType(headers http.Header) string {
+	ct := headers.Get("Content-Type")
+	if mt, _, err := mime.ParseMediaType(ct); err == nil && mt == MEDIA_TYPE_OCTET_STREAM {
+		return ""
+	}
+	return ct
+}
+
 func toHeadersForm(msg wrp.Union, typ string, validators ...wrp.Processor) (http.Header, []byte, error) {
 	headers := make(http.Header)
 
@@ -112,12 +142,8 @@ func toHeadersForm(msg wrp.Union, typ string, validators ...wrp.Processor) (http
 	h.toStringHeader(serviceNameHeader, out.ServiceName, headers)
 	h.toStringHeader(urlHeader, out.URL, headers)
 	h.toStringHeader(contentTypeHeader, out.ContentType, headers)
-	if out.Metadata != nil {
-		for k, v := range out.Metadata {
-			if v != "" {
-				headers.Add(metadataHeader.As(typ), fmt.Sprintf("%s:%s", k, v))
-			}
-		}
+	for k, v := range out.Metadata {
+		headers.Add(metadataHeader.As(typ), k+"="+v)
 	}
 	partners := strings.Join(out.PartnerIDs, ",")
 	if partners != "" {
@@ -137,7 +163,7 @@ func toHeadersForm(msg wrp.Union, typ string, validators ...wrp.Processor) (http
 func fromHeaders(headers http.Header, body io.ReadCloser, validators ...wrp.Processor) (wrp.Union, error) {
 	var msg wrp.Message
 
-	if msgType := messageTypeHeader.Get(headers); msgType != "" {
+	if msgType := getMessageType(headers); msgType != "" {
 		msg.Type = wrp.StringToMessageType(msgType)
 	}
 
@@ -157,6 +183,9 @@ func fromHeaders(headers http.Header, body io.ReadCloser, validators ...wrp.Proc
 	h.readHashmap(metadataHeader, &msg.Metadata)
 	h.readHeaders(headersHeader, &msg.Headers)
 	h.readString(contentTypeHeader, &msg.ContentType)
+	if msg.ContentType == "" {
+		msg.ContentType = payloadContentType(headers)
+	}
 
 	if body != nil {
 		payload, err := io.ReadAll(body)
@@ -226,15 +255,15 @@ func (h wrpHeader) readInt(key hdr, target **int64) {
 	}
 }
 
+// readHashmap reads metadata the way wrp-go/v3 does: each header value is a
+// comma separated list of key=value pairs.
 func (h wrpHeader) readHashmap(key hdr, target *map[string]string) {
 	if hashmap := key.Values(h.headers); len(hashmap) > 0 {
 		rv := make(map[string]string)
-		for _, m := range hashmap {
-			pair := strings.SplitN(m, ":", 2)
-			if len(pair) == 2 {
-				key := strings.TrimSpace(pair[0])
-				value := strings.TrimSpace(pair[1])
-				rv[key] = value
+		for _, line := range hashmap {
+			for _, pair := range strings.Split(line, ",") {
+				k, v, _ := strings.Cut(pair, "=")
+				rv[strings.TrimSpace(k)] = v
 			}
 		}
 		*target = rv
