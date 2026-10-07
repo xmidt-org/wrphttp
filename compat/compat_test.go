@@ -174,7 +174,8 @@ func TestV3RequestToDecodeRequest(t *testing.T) {
 	}{
 		{name: "msgpack", request: v3EncodedBody(v3.Msgpack, wrphttp.MEDIA_TYPE_MSGPACK)},
 		{name: "json", request: v3EncodedBody(v3.JSON, wrphttp.MEDIA_TYPE_JSON)},
-		{name: "msgpack without Content-Type", request: v3EncodedBody(v3.Msgpack, "")},
+		{name: "msgpack without Content-Type (v3 handler default)", request: v3EncodedBody(v3.Msgpack, "")},
+		{name: "json without Content-Type (v3 DecodeRequest default)", request: v3EncodedBody(v3.JSON, "")},
 		{name: "msgpack as application/wrp", request: v3EncodedBody(v3.Msgpack, "application/wrp")},
 		{name: "header form, json payload", request: v3HeaderForm(false), headerForm: true},
 		{
@@ -223,6 +224,99 @@ func TestV3RequestToDecodeRequest(t *testing.T) {
 	}
 }
 
+// An intermediary may fold repeated X-Xmidt-Headers lines into one comma
+// separated line (RFC 9110 §5.3).  Both libraries split it back into entries,
+// but v3 splits at every comma, which breaks a tracestate value apart; this
+// library splits only where a new "name:" entry starts.
+func TestV3FoldedHeaders(t *testing.T) {
+	entries := []string{
+		"traceparent: 00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
+		"tracestate: congo=t61rcWkgMzE,rojo=00f067aa0ba902b7",
+	}
+	v3Split := []string{entries[0], "tracestate: congo=t61rcWkgMzE", "rojo=00f067aa0ba902b7"}
+
+	tests := []struct {
+		name   string
+		legacy bool
+		fold   func(http.Header) // nil leaves v3's one line per entry
+		v3Want []string
+	}{
+		{name: "one line per entry, as v3 sends it", v3Want: v3Split},
+		{
+			name:   "folded",
+			fold:   func(h http.Header) { h.Set("X-Xmidt-Headers", strings.Join(entries, ", ")) },
+			v3Want: v3Split,
+		}, {
+			name:   "folded without spaces",
+			fold:   func(h http.Header) { h.Set("X-Xmidt-Headers", strings.Join(entries, ",")) },
+			v3Want: v3Split,
+		}, {
+			name:   "folded, legacy names",
+			legacy: true,
+			fold:   func(h http.Header) { h.Set("X-Midt-Headers", strings.Join(entries, ", ")) },
+			v3Want: v3Split,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			m := testMessage()
+			m.Headers = entries
+			want := headerForm(testMessage())
+			want.Headers = entries
+
+			req := v3HeaderForm(tc.legacy)(toV3(m))
+			if tc.fold != nil {
+				tc.fold(req.Header)
+			}
+
+			got, err := wrphttp.DecodeRequest(req)
+			require.NoError(t, err)
+			require.Len(t, got, 1)
+			var msg wrp.Message
+			require.NoError(t, got[0].To(&msg))
+			require.NoError(t, equal(want, &msg))
+
+			// v3, for the record: it splits at every comma, folded or not.
+			v3Got, err := serveV3(v3http.DecodeEntityFromSources(v3.Msgpack, true), req)
+			require.NoError(t, err)
+			assert.Equal(t, tc.v3Want, v3Got.Headers)
+		})
+	}
+}
+
+// v3 reads a body with no Content-Type as msgpack in its handler and as JSON
+// in DecodeRequest, so each v3 path reads only what the other rejects.  This
+// library reads both.
+func TestV3NoContentType(t *testing.T) {
+	m := toV3(testMessage())
+
+	msgpack := v3EncodedBody(v3.Msgpack, "")
+	json := v3EncodedBody(v3.JSON, "")
+
+	// v3, for the record.
+	_, err := serveV3(v3http.DefaultDecoder(), msgpack(m))
+	require.NoError(t, err, "v3 handler reads msgpack")
+	_, err = serveV3(v3http.DefaultDecoder(), json(m))
+	require.Error(t, err, "v3 handler rejects json")
+
+	_, err = v3http.DecodeRequest(json(m), nil)
+	require.NoError(t, err, "v3 DecodeRequest reads json")
+	_, err = v3http.DecodeRequest(msgpack(m), nil)
+	require.Error(t, err, "v3 DecodeRequest rejects msgpack")
+
+	for name, req := range map[string]v3Request{"msgpack": msgpack, "json": json} {
+		t.Run(name, func(t *testing.T) {
+			got, err := wrphttp.DecodeRequest(req(m))
+			require.NoError(t, err)
+			require.Len(t, got, 1)
+			var msg wrp.Message
+			require.NoError(t, got[0].To(&msg))
+			require.NoError(t, equal(testMessage(), &msg))
+		})
+	}
+}
+
 // v3 accepts fields on any message type; v5 validation does not.
 func TestV3LenientFields(t *testing.T) {
 	m := toV3(testMessage())
@@ -261,6 +355,7 @@ func TestEncoderToV3Handler(t *testing.T) {
 		decoder    v3http.Decoder
 		count      int
 		headerForm bool
+		modify     func(*wrp.Message)
 		gap        string
 	}{
 		{name: "msgpack", opts: []wrphttp.Option{wrphttp.AsMsgpack()}},
@@ -270,6 +365,17 @@ func TestEncoderToV3Handler(t *testing.T) {
 			opts:       []wrphttp.Option{wrphttp.AsOctetStream()},
 			decoder:    headers,
 			headerForm: true,
+		}, {
+			name:       "octet-stream, Headers entry containing a comma",
+			opts:       []wrphttp.Option{wrphttp.AsOctetStream()},
+			decoder:    headers,
+			headerForm: true,
+			modify:     func(m *wrp.Message) { m.Headers = []string{"tracestate: a=1,b=2"} },
+			gap:        "v3 splits Headers entries at every comma",
+		}, {
+			name:   "msgpack, Headers entry containing a comma",
+			opts:   []wrphttp.Option{wrphttp.AsMsgpack()},
+			modify: func(m *wrp.Message) { m.Headers = []string{"tracestate: a=1,b=2"} },
 		},
 		// v5-only forms, documented as such.
 		{
@@ -298,9 +404,13 @@ func TestEncoderToV3Handler(t *testing.T) {
 			enc, err := wrphttp.NewEncoder(tc.opts...)
 			require.NoError(t, err)
 
-			msgs := []wrp.Union{testMessage()}
+			sent := testMessage()
+			if tc.modify != nil {
+				tc.modify(sent)
+			}
+			msgs := []wrp.Union{sent}
 			for i := 1; i < tc.count; i++ {
-				msgs = append(msgs, testMessage())
+				msgs = append(msgs, sent)
 			}
 			req, err := enc.NewRequest(http.MethodPost, "http://example.com/", msgs...)
 			require.NoError(t, err)
@@ -311,6 +421,9 @@ func TestEncoderToV3Handler(t *testing.T) {
 			}
 
 			want := testMessage()
+			if tc.modify != nil {
+				tc.modify(want)
+			}
 			if tc.headerForm {
 				want = headerForm(want)
 			}

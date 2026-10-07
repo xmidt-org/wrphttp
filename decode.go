@@ -160,13 +160,14 @@ func fromPart(h http.Header, body io.ReadCloser, validators ...wrp.Processor) ([
 		return fromOctetStream(h, body, validators...)
 	}
 
-	// Like wrp-go/v3, a missing Content-Type means msgpack.
-	ct := mtMsgpack
+	var ct mediaType
 	if v := h.Get("Content-Type"); v != "" {
 		ct, err = toMediaTypeFromMime(v)
 		if err != nil {
 			return nil, err
 		}
+	} else {
+		body, ct = sniffFormat(body)
 	}
 
 	switch ct {
@@ -184,6 +185,38 @@ func fromPart(h http.Header, body io.ReadCloser, validators ...wrp.Processor) ([
 
 	// Unreachable.
 	return nil, fmt.Errorf("unsupported media type: %s", ct)
+}
+
+// sniffFormat decides whether a body sent without a Content-Type is JSON or
+// msgpack, and returns a reader that still yields the whole body.
+//
+// wrp-go/v3 was of two minds: its DecodeRequest assumed JSON and its handler
+// assumed msgpack.  The first byte tells them apart.  A JSON text starts with
+// whitespace (space, tab, LF or CR), '{' or '[' (RFC 8259 §2), while a
+// msgpack map or array starts with a byte of 0x80 or above (0x80-0x8f, 0xde
+// or 0xdf for a map).  Anything else, including an empty body, is read as
+// msgpack, as wrp-go/v3's handler did.
+func sniffFormat(body io.ReadCloser) (io.ReadCloser, mediaType) {
+	if body == nil {
+		return nil, mtMsgpack
+	}
+
+	br := bufio.NewReader(body)
+	rc := struct {
+		io.Reader
+		io.Closer
+	}{br, body}
+
+	b, err := br.Peek(1)
+	if err != nil {
+		return rc, mtMsgpack
+	}
+
+	switch b[0] {
+	case ' ', '\t', '\n', '\r', '{', '[':
+		return rc, mtJSON
+	}
+	return rc, mtMsgpack
 }
 
 func fromFormat(f wrp.Format, body io.ReadCloser, validators ...wrp.Processor) ([]wrp.Union, error) {

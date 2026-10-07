@@ -23,8 +23,18 @@ When decoding, the form is chosen this way:
 
   - If a message type header is present, the message is in header form,
     whatever the Content-Type.  This matches wrp-go/v3.
-  - Otherwise the Content-Type decides.  A missing Content-Type means
-    msgpack, and the deprecated application/wrp also means msgpack.
+  - Otherwise the Content-Type decides.  The deprecated application/wrp
+    means msgpack.
+  - If there is no Content-Type, the first byte of the body decides: JSON
+    starts with whitespace, '{' or '['; anything else is msgpack.  wrp-go/v3
+    assumed JSON in DecodeRequest and msgpack in its handler, so this reads
+    what either sent.
+
+In header form each Headers entry is one X-Xmidt-Headers line.  An
+intermediary may fold those lines into one comma separated line (RFC 9110
+§5.3), so a line is split back into entries at each comma that is followed by
+another "name:" entry.  A comma inside an entry's value, as in a tracestate,
+is kept.  wrp-go/v3 splits at every comma.
 
 # Working with wrp-go/v3
 

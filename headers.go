@@ -270,14 +270,75 @@ func (h wrpHeader) readHashmap(key hdr, target *map[string]string) {
 	}
 }
 
+// readHeaders reads the Headers field.  A sender writes one entry per header
+// line, but an intermediary may fold repeated lines into one comma separated
+// line (RFC 9110 §5.3), so each line is split back into entries.
 func (h wrpHeader) readHeaders(key hdr, target *[]string) {
 	if array := key.Values(h.headers); len(array) > 0 {
 		rv := make([]string, 0, len(array))
-		for _, item := range array {
-			if item != "" {
-				rv = append(rv, item)
-			}
+		for _, line := range array {
+			rv = append(rv, splitHeaderEntries(line)...)
 		}
 		*target = rv
 	}
+}
+
+// splitHeaderEntries splits a folded Headers line into its entries.
+//
+// An entry is itself an HTTP style "Name: value" header and its value may
+// contain commas, as a tracestate does, so a comma only ends an entry when
+// what follows it starts another one: a header name and a colon.  Given
+//
+//	traceparent: a, tracestate: b=1,c=2
+//
+// the result is "traceparent: a" and "tracestate: b=1,c=2".  wrp-go/v3
+// splits at every comma, which breaks the tracestate into two entries.
+//
+// A value that contains a comma followed by a "name:" of its own is split
+// wrongly; such a value can't be told apart from two entries.
+func splitHeaderEntries(line string) []string {
+	var entries []string
+	start := 0
+	for i := 0; i < len(line); i++ {
+		if line[i] == ',' && isEntryBoundary(line[i+1:]) {
+			entries = appendHeaderEntry(entries, line[start:i])
+			start = i + 1
+		}
+	}
+	return appendHeaderEntry(entries, line[start:])
+}
+
+// ows is optional whitespace (RFC 9110 §5.6.3), what may surround an entry.
+const ows = " \t"
+
+func appendHeaderEntry(entries []string, entry string) []string {
+	if entry = strings.Trim(entry, ows); entry != "" {
+		entries = append(entries, entry)
+	}
+	return entries
+}
+
+// isEntryBoundary reports whether the comma before rest ends an entry: rest
+// starts a new "name:" entry, or is empty or another comma, an empty list
+// element that RFC 9110 §5.6.1 says to ignore.
+func isEntryBoundary(rest string) bool {
+	s := strings.TrimLeft(rest, ows)
+	if s == "" || s[0] == ',' {
+		return true
+	}
+	i := 0
+	for i < len(s) && isTokenChar(s[i]) {
+		i++
+	}
+	return i > 0 && i < len(s) && s[i] == ':'
+}
+
+// isTokenChar reports whether c is a tchar (RFC 9110 §5.6.2), the characters
+// allowed in a header field name.
+func isTokenChar(c byte) bool {
+	switch {
+	case 'a' <= c && c <= 'z', 'A' <= c && c <= 'Z', '0' <= c && c <= '9':
+		return true
+	}
+	return strings.IndexByte("!#$%&'*+-.^_`|~", c) >= 0
 }
