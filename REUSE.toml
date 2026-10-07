@@ -44,3 +44,9 @@ path = ".whitesource"
 precedence = "aggregate"
 SPDX-FileCopyrightText = "SPDX-FileCopyrightText: 2022 Comcast Cable Communications Management, LLC"
 SPDX-License-Identifier = "Apache-2.0"
+
+[[annotations]]
+path = "testdata/fuzz/**"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "SPDX-FileCopyrightText: 2026 Comcast Cable Communications Management, LLC"
+SPDX-License-Identifier = "Apache-2.0"

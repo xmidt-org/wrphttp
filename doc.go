@@ -26,6 +26,12 @@ When decoding, the form is chosen this way:
   - Otherwise the Content-Type decides.  A missing Content-Type means
     msgpack, and the deprecated application/wrp also means msgpack.
 
+In header form each Headers entry is one X-Xmidt-Headers line.  An
+intermediary may fold those lines into one comma separated line (RFC 9110
+§5.3), so a line is split back into entries at each comma that is followed by
+another "name:" entry.  A comma inside an entry's value, as in a tracestate,
+is kept.  wrp-go/v3 splits at every comma.
+
 # Working with wrp-go/v3
 
 Every form github.com/xmidt-org/wrp-go/v3/wrphttp sends is decoded, subject to

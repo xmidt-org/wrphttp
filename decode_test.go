@@ -327,6 +327,10 @@ func TestDecodeV3Forms(t *testing.T) {
 		maps.Copy(h, extra)
 		return h
 	}
+	withHeaders := func(m *wrp.Message, headers ...string) *wrp.Message {
+		m.Headers = append([]string{}, headers...)
+		return m
+	}
 	headerMsg := func(ct string, payload []byte, md map[string]string) *wrp.Message {
 		return &wrp.Message{
 			Type:        wrp.SimpleEventMessageType,
@@ -404,6 +408,30 @@ func TestDecodeV3Forms(t *testing.T) {
 			name:     "metadata as a comma separated list",
 			header:   headerForm(http.Header{"X-Xmidt-Metadata": {"a=1, b=2,c"}}),
 			expected: headerMsg("", []byte{}, map[string]string{"a": "1", "b": "2", "c": ""}),
+		}, {
+			name: "headers, one entry per line",
+			header: headerForm(http.Header{
+				"X-Xmidt-Headers": {"traceparent: a", "tracestate: b=1,c=2"},
+			}),
+			expected: withHeaders(headerMsg("", []byte{}, nil), "traceparent: a", "tracestate: b=1,c=2"),
+		}, {
+			name: "headers folded onto one line by an intermediary",
+			header: headerForm(http.Header{
+				"X-Xmidt-Headers": {"traceparent: a, tracestate: b=1,c=2", "X-Foo: bar"},
+			}),
+			expected: withHeaders(headerMsg("", []byte{}, nil), "traceparent: a", "tracestate: b=1,c=2", "X-Foo: bar"),
+		}, {
+			name:     "headers folded, legacy X-Midt name",
+			header:   headerForm(http.Header{"X-Midt-Headers": {"traceparent: a, tracestate: b=1,c=2"}}),
+			expected: withHeaders(headerMsg("", []byte{}, nil), "traceparent: a", "tracestate: b=1,c=2"),
+		}, {
+			name:     "headers folded, Xmidt name",
+			header:   headerForm(http.Header{"Xmidt-Headers": {"traceparent: a, tracestate: b=1,c=2"}}),
+			expected: withHeaders(headerMsg("", []byte{}, nil), "traceparent: a", "tracestate: b=1,c=2"),
+		}, {
+			name:     "headers with an empty value",
+			header:   headerForm(http.Header{"X-Xmidt-Headers": {""}}),
+			expected: withHeaders(headerMsg("", []byte{}, nil)),
 		},
 	}
 
