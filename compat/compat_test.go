@@ -174,7 +174,8 @@ func TestV3RequestToDecodeRequest(t *testing.T) {
 	}{
 		{name: "msgpack", request: v3EncodedBody(v3.Msgpack, wrphttp.MEDIA_TYPE_MSGPACK)},
 		{name: "json", request: v3EncodedBody(v3.JSON, wrphttp.MEDIA_TYPE_JSON)},
-		{name: "msgpack without Content-Type", request: v3EncodedBody(v3.Msgpack, "")},
+		{name: "msgpack without Content-Type (v3 handler default)", request: v3EncodedBody(v3.Msgpack, "")},
+		{name: "json without Content-Type (v3 DecodeRequest default)", request: v3EncodedBody(v3.JSON, "")},
 		{name: "msgpack as application/wrp", request: v3EncodedBody(v3.Msgpack, "application/wrp")},
 		{name: "header form, json payload", request: v3HeaderForm(false), headerForm: true},
 		{
@@ -280,6 +281,38 @@ func TestV3FoldedHeaders(t *testing.T) {
 			v3Got, err := serveV3(v3http.DecodeEntityFromSources(v3.Msgpack, true), req)
 			require.NoError(t, err)
 			assert.Equal(t, tc.v3Want, v3Got.Headers)
+		})
+	}
+}
+
+// v3 reads a body with no Content-Type as msgpack in its handler and as JSON
+// in DecodeRequest, so each v3 path reads only what the other rejects.  This
+// library reads both.
+func TestV3NoContentType(t *testing.T) {
+	m := toV3(testMessage())
+
+	msgpack := v3EncodedBody(v3.Msgpack, "")
+	json := v3EncodedBody(v3.JSON, "")
+
+	// v3, for the record.
+	_, err := serveV3(v3http.DefaultDecoder(), msgpack(m))
+	require.NoError(t, err, "v3 handler reads msgpack")
+	_, err = serveV3(v3http.DefaultDecoder(), json(m))
+	require.Error(t, err, "v3 handler rejects json")
+
+	_, err = v3http.DecodeRequest(json(m), nil)
+	require.NoError(t, err, "v3 DecodeRequest reads json")
+	_, err = v3http.DecodeRequest(msgpack(m), nil)
+	require.Error(t, err, "v3 DecodeRequest rejects msgpack")
+
+	for name, req := range map[string]v3Request{"msgpack": msgpack, "json": json} {
+		t.Run(name, func(t *testing.T) {
+			got, err := wrphttp.DecodeRequest(req(m))
+			require.NoError(t, err)
+			require.Len(t, got, 1)
+			var msg wrp.Message
+			require.NoError(t, got[0].To(&msg))
+			require.NoError(t, equal(testMessage(), &msg))
 		})
 	}
 }
