@@ -5,7 +5,7 @@ go 1.26.5
 require (
 	github.com/stretchr/testify v1.12.1
 	github.com/xmidt-org/wrp-go/v3 v3.7.0
-	github.com/xmidt-org/wrp-go/v5 v5.4.6
+	github.com/xmidt-org/wrp-go/v5 v5.4.7
 	github.com/xmidt-org/wrphttp v0.0.0
 )
 
